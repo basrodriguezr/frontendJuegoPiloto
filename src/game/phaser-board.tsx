@@ -1,0 +1,509 @@
+"use client";
+
+import { useEffect, useRef } from "react";
+import type * as PhaserTypes from "phaser";
+import type { PlayOutcome, SymbolPaytableEntry } from "@/api/types";
+import { gameBus } from "@/game/events";
+
+type Props = {
+  play?: PlayOutcome;
+  symbolPaytable?: SymbolPaytableEntry[];
+};
+
+type PhaserModule = typeof import("phaser");
+
+type BoardMetrics = {
+  cellSize: number;
+  gap: number;
+  offsetY: number;
+  padding: number;
+  width: number;
+  height: number;
+  rows: number;
+  cols: number;
+};
+
+const DEFAULT_METRICS: BoardMetrics = {
+  cellSize: 70,
+  gap: 8,
+  offsetY: 32,
+  padding: 0,
+  width: 640,
+  height: 640,
+  rows: 7,
+  cols: 5,
+};
+
+function pickBoardSize(play: PlayOutcome | undefined): { rows: number; cols: number } {
+  if (play?.grid0?.length && play.grid0[0]?.length) {
+    return { rows: play.grid0.length, cols: play.grid0[0].length };
+  }
+  return { rows: DEFAULT_METRICS.rows, cols: DEFAULT_METRICS.cols };
+}
+
+function normalizeGrid(grid: string[][], rows: number, cols: number): string[][] {
+  const safeGrid = Array.isArray(grid) ? grid : [];
+  return Array.from({ length: rows }, (_, r) =>
+    Array.from({ length: cols }, (_, c) => safeGrid[r]?.[c] ?? ""),
+  );
+}
+
+function hexToRgb(hex: string): { r: number; g: number; b: number } {
+  const safe = hex.replace("#", "");
+  const parsed = safe.length === 3
+    ? safe.split("").map((c) => c + c).join("")
+    : safe.padEnd(6, "0");
+  const num = parseInt(parsed, 16);
+  return {
+    r: (num >> 16) & 0xff,
+    g: (num >> 8) & 0xff,
+    b: num & 0xff,
+  };
+}
+
+function clampChannel(value: number): number {
+  return Math.max(0, Math.min(255, Math.round(value)));
+}
+
+function darkenColor({ r, g, b }: { r: number; g: number; b: number }, amount: number): number {
+  const factor = 1 - amount;
+  return (clampChannel(r * factor) << 16) | (clampChannel(g * factor) << 8) | clampChannel(b * factor);
+}
+
+function lightenColor({ r, g, b }: { r: number; g: number; b: number }, amount: number): number {
+  return (
+    (clampChannel(r + (255 - r) * amount) << 16) |
+    (clampChannel(g + (255 - g) * amount) << 8) |
+    clampChannel(b + (255 - b) * amount)
+  );
+}
+
+function computeMetrics(play: PlayOutcome | undefined, containerWidth: number, containerHeight?: number): BoardMetrics {
+  const size = pickBoardSize(play);
+  const rows = Math.max(1, size.rows);
+  const cols = Math.max(1, size.cols);
+
+  const safeWidth = containerWidth > 0 ? containerWidth : DEFAULT_METRICS.width;
+  const padding = safeWidth >= 640 ? 12 : 8;
+  const gap = 2;
+
+  const usable = Math.max(120, safeWidth - padding * 2 - gap * (cols - 1));
+  const rawCell = cols > 0 ? usable / cols : DEFAULT_METRICS.cellSize;
+  const cellSize = Math.min(72, Math.max(20, rawCell));
+
+  const width = padding * 2 + cols * cellSize + gap * (cols - 1);
+  const offsetY = 32;
+  const height = offsetY + rows * cellSize + gap * (rows - 1) + padding;
+
+  return { cellSize, gap, offsetY, padding, width, height, rows, cols };
+}
+
+function createBoardScene(
+  Phaser: PhaserModule,
+  getMetrics: () => BoardMetrics,
+  getInitialPlay: () => PlayOutcome | undefined,
+  getSymbolColor: (symbol: string) => string,
+) {
+  return class BoardScene extends Phaser.Scene {
+    private cellMap = new Map<string, Phaser.GameObjects.Container>();
+    private grid?: string[][];
+    private boardSize = pickBoardSize(undefined);
+    private header?: Phaser.GameObjects.Text;
+    private metrics: BoardMetrics = getMetrics();
+    private currentPlay?: PlayOutcome;
+    private accumulatedWin = 0;
+    private lastPositions?: { offsetX: number; offsetY: number };
+
+    constructor() {
+      super("BoardScene");
+    }
+
+    create() {
+      this.cameras.main.setBackgroundColor("#0b1224");
+      this.header = this.add.text(12, 12, "Tablero listo", {
+        fontFamily: "var(--font-geist-sans)",
+        fontSize: "16px",
+        color: "#e2e8f0",
+      });
+
+      this.events.on("render-play", (play: PlayOutcome) => {
+        this.renderPlay(play);
+      });
+
+      const initialPlay = getInitialPlay();
+      if (initialPlay) {
+        this.renderPlay(initialPlay);
+      }
+
+      this.events.on("metrics-changed", (metrics: BoardMetrics) => {
+        this.metrics = metrics;
+        if (this.grid) {
+          this.drawGrid(this.grid);
+        }
+      });
+    }
+
+    private getBoardOffsets() {
+      const { cellSize, gap, offsetY } = this.metrics;
+      const rows = this.boardSize.rows;
+      const cols = this.boardSize.cols;
+      const totalGridWidth = cols * cellSize + (cols - 1) * gap;
+      const totalGridHeight = rows * cellSize + (rows - 1) * gap;
+      const canvasWidth = this.scale?.width ?? this.metrics.width;
+      const canvasHeight = this.scale?.height ?? this.metrics.height;
+      const offsetX = Math.round((canvasWidth - totalGridWidth) / 2);
+      const centeredY = Math.round((canvasHeight - totalGridHeight) / 2);
+      const finalOffsetY = Math.max(centeredY, offsetY);
+      this.lastPositions = { offsetX, offsetY: finalOffsetY };
+      return this.lastPositions;
+    }
+
+    private getCellPosition(row: number, col: number) {
+      const { cellSize, gap } = this.metrics;
+      const offsets = this.lastPositions ?? this.getBoardOffsets();
+      const x = offsets.offsetX + col * (cellSize + gap);
+      const y = offsets.offsetY + row * (cellSize + gap);
+      return { x, y };
+    }
+
+    private createCellContainer(symbol: string, x: number, y: number) {
+      const { cellSize } = this.metrics;
+      const symbolColor = getSymbolColor(symbol);
+      const symbolRgb = hexToRgb(symbolColor);
+      const baseFill = darkenColor(symbolRgb, 0.7);
+      const glowFill = darkenColor(symbolRgb, 0.55);
+      const highlightFill = lightenColor(symbolRgb, 0.2);
+
+      const rect = this.add.rectangle(0, 0, cellSize, cellSize, baseFill, 0.95);
+      rect.setStrokeStyle(2, glowFill, 0.9);
+      rect.setOrigin(0);
+
+      const highlight = this.add.rectangle(2, 2, cellSize - 4, Math.max(12, cellSize * 0.38), highlightFill, 0.35);
+      highlight.setOrigin(0);
+
+      const labelFontSize = `12px`;
+      const label = this.add.text(cellSize / 2, cellSize / 2, symbol, {
+        fontFamily: "var(--font-geist-sans)",
+        fontSize: labelFontSize,
+        color: "#f8fafc",
+      });
+      label.setOrigin(0.5);
+
+      return this.add.container(x, y, [rect, highlight, label]);
+    }
+
+    renderPlay(play: PlayOutcome) {
+      this.time.removeAllEvents();
+      this.tweens.killAll();
+      this.currentPlay = play;
+      this.accumulatedWin = 0;
+      const size = pickBoardSize(play);
+      this.boardSize = {
+        rows: Math.max(1, size.rows),
+        cols: Math.max(1, size.cols),
+      };
+      this.grid = normalizeGrid(play.grid0, this.boardSize.rows, this.boardSize.cols);
+      this.header?.setText(`Play ${play.playId} - ${play.mode.toUpperCase()} - Win 0`);
+      this.drawGrid(this.grid);
+
+      const initialDelay = 800;
+      const runStep = (idx: number) => {
+        if (!this.grid || idx >= play.cascades.length) {
+          return;
+        }
+        this.animateStep(play.cascades[idx], idx, play.cascades.length, () => {
+          this.time.delayedCall(250, () => runStep(idx + 1));
+        });
+      };
+      this.time.delayedCall(initialDelay, () => runStep(0));
+    }
+
+    private animateStep(
+      step: PlayOutcome["cascades"][number],
+      stepIndex: number,
+      totalSteps: number,
+      onComplete: () => void,
+    ) {
+      if (!this.grid) {
+        onComplete();
+        return;
+      }
+
+      const removeSet = new Set(step.removeCells.map((cell) => `${cell.row}-${cell.col}`));
+      const stepWin = step.winStep ?? 0;
+      const removalDuration = 520;
+
+      step.removeCells.forEach((cell) => {
+        const sprite = this.cellMap.get(`${cell.row}-${cell.col}`);
+        if (sprite) {
+          this.tweens.add({
+            targets: sprite,
+            scale: 0.6,
+            alpha: 0,
+            duration: removalDuration,
+            ease: "Cubic.easeIn",
+          });
+        }
+      });
+
+      if (this.currentPlay?.playId && stepWin > 0) {
+        this.accumulatedWin += stepWin;
+        gameBus.emit("game:win:increment", { playId: this.currentPlay.playId, amount: stepWin });
+        this.header?.setText(
+          `Play ${this.currentPlay?.playId ?? ""} - Paso ${stepIndex + 1}/${totalSteps} - Win ${this.accumulatedWin}`,
+        );
+      }
+
+      const applyDelay = removalDuration + 160;
+
+      this.time.delayedCall(applyDelay, () => {
+        if (!this.grid) {
+          onComplete();
+          return;
+        }
+        const rows = this.boardSize.rows;
+        const cols = this.boardSize.cols;
+        const dropDistance = this.metrics.cellSize * (rows + 1);
+        const nextGrid = step.gridAfter ?? this.grid;
+        this.grid = normalizeGrid(nextGrid, rows, cols);
+        this.getBoardOffsets();
+
+        const newMap = new Map<string, Phaser.GameObjects.Container>();
+        const dropDuration = 480;
+
+        for (let col = 0; col < cols; col += 1) {
+          const survivors: Phaser.GameObjects.Container[] = [];
+          for (let row = rows - 1; row >= 0; row -= 1) {
+            const key = `${row}-${col}`;
+            if (removeSet.has(key)) continue;
+            const container = this.cellMap.get(key);
+            if (container) {
+              survivors.push(container);
+            }
+          }
+
+          let writeRow = rows - 1;
+          survivors.forEach((container) => {
+            const targetRow = writeRow;
+            writeRow -= 1;
+            const { x, y } = this.getCellPosition(targetRow, col);
+            const prevRow = container.getData("row");
+            const prevCol = container.getData("col");
+            container.setData("row", targetRow);
+            container.setData("col", col);
+            newMap.set(`${targetRow}-${col}`, container);
+            if (prevRow !== targetRow || prevCol !== col) {
+              this.tweens.add({
+                targets: container,
+                x,
+                y,
+                duration: dropDuration,
+                ease: "Cubic.easeOut",
+              });
+            }
+          });
+
+          const dropSymbols = step.dropIn.find((d) => d.col === col)?.symbols ?? [];
+          for (let i = dropSymbols.length - 1; i >= 0; i -= 1) {
+            const symbol = dropSymbols[i];
+            const targetRow = writeRow;
+            writeRow -= 1;
+            const { x, y } = this.getCellPosition(targetRow, col);
+            const startY = y - dropDistance;
+            const container = this.createCellContainer(symbol, x, startY);
+            container.setAlpha(0);
+            container.setData("row", targetRow);
+            container.setData("col", col);
+            newMap.set(`${targetRow}-${col}`, container);
+            this.tweens.add({
+              targets: container,
+              y,
+              alpha: 1,
+              duration: dropDuration,
+              ease: "Cubic.easeOut",
+            });
+          }
+        }
+
+        this.cellMap.forEach((container, key) => {
+          if (removeSet.has(key)) {
+            container.destroy();
+          }
+        });
+        this.cellMap.clear();
+        newMap.forEach((value, key) => this.cellMap.set(key, value));
+
+        if (stepWin === 0) {
+          this.header?.setText(
+            `Play ${this.currentPlay?.playId ?? ""} - Paso ${stepIndex + 1}/${totalSteps} - Win ${this.accumulatedWin}`,
+          );
+        }
+        this.time.delayedCall(dropDuration + 120, onComplete);
+      });
+    }
+
+    private drawGrid(grid: string[][]) {
+      this.cellMap.forEach((cell) => cell.destroy());
+      this.cellMap.clear();
+
+      const rows = Math.max(1, this.boardSize.rows);
+      const cols = Math.max(1, this.boardSize.cols);
+      this.grid = normalizeGrid(grid, rows, cols);
+      this.boardSize = { rows, cols };
+
+      const { cellSize } = this.metrics;
+      const offsets = this.getBoardOffsets();
+
+      for (let row = 0; row < rows; row += 1) {
+        for (let col = 0; col < cols; col += 1) {
+          const x = offsets.offsetX + col * (cellSize + this.metrics.gap);
+          const y = offsets.offsetY + row * (cellSize + this.metrics.gap);
+          const container = this.createCellContainer(grid[row][col], x, y);
+          container.setData("row", row);
+          container.setData("col", col);
+          this.cellMap.set(`${row}-${col}`, container);
+        }
+      }
+    }
+  };
+}
+
+export function PhaserBoard({ play, symbolPaytable }: Props) {
+  const containerRef = useRef<HTMLDivElement | null>(null);
+  const gameRef = useRef<PhaserTypes.Game | null>(null);
+  const phaserRef = useRef<PhaserModule | null>(null);
+  const metricsRef = useRef<BoardMetrics>(DEFAULT_METRICS);
+  const containerWidthRef = useRef<number>(DEFAULT_METRICS.width);
+  const playRef = useRef<PlayOutcome | undefined>(undefined);
+  const symbolColorRef = useRef<Map<string, string>>(new Map());
+
+  useEffect(() => {
+    playRef.current = play;
+  }, [play]);
+
+  useEffect(() => {
+    const map = new Map<string, string>();
+    (symbolPaytable ?? []).forEach((entry) => {
+      if (entry?.symbol && entry?.color) {
+        map.set(entry.symbol, entry.color);
+      }
+    });
+    symbolColorRef.current = map;
+  }, [symbolPaytable]);
+
+  useEffect(() => {
+    if (typeof window === "undefined" || !containerRef.current || gameRef.current) {
+      return;
+    }
+
+    let canceled = false;
+
+    const resizeMetrics = () => {
+      if (!containerRef.current || !gameRef.current) return;
+      containerWidthRef.current = containerRef.current.clientWidth || DEFAULT_METRICS.width;
+      metricsRef.current = computeMetrics(
+        undefined,
+        containerWidthRef.current,
+        containerRef.current?.clientHeight || DEFAULT_METRICS.height,
+      );
+      gameRef.current.scale.resize(metricsRef.current.width, metricsRef.current.height);
+      const scene = gameRef.current.scene.getScene("BoardScene");
+      if (scene?.events) {
+        scene.events.emit("metrics-changed", metricsRef.current);
+      }
+      containerRef.current.style.minHeight = `${metricsRef.current.height + 20}px`;
+    };
+
+    (async () => {
+      const Phaser = await import("phaser");
+      if (canceled || !containerRef.current) return;
+      phaserRef.current = Phaser;
+      containerWidthRef.current = containerRef.current.clientWidth || DEFAULT_METRICS.width;
+      metricsRef.current = computeMetrics(
+        undefined,
+        containerWidthRef.current,
+        containerRef.current?.clientHeight || DEFAULT_METRICS.height
+      );
+      const BoardScene = createBoardScene(
+        Phaser,
+        () => metricsRef.current,
+        () => playRef.current,
+        (symbol) => symbolColorRef.current.get(symbol) ?? "#e2e8f0",
+      );
+
+      gameRef.current = new Phaser.Game({
+        type: Phaser.AUTO,
+        scale: {
+          mode: Phaser.Scale.FIT,
+          autoCenter: Phaser.Scale.CENTER_BOTH,
+          width: metricsRef.current.width,
+          height: metricsRef.current.height,
+        },
+        parent: containerRef.current,
+        backgroundColor: "#0b1224",
+        scene: new BoardScene(),
+      });
+
+      resizeMetrics();
+      window.addEventListener("resize", resizeMetrics);
+
+      const canvas = gameRef.current.canvas;
+      canvas.style.width = `${metricsRef.current.width}px`;
+      canvas.style.height = `${metricsRef.current.height}px`;
+      canvas.style.maxWidth = "100%";
+      canvas.style.margin = "0 auto";
+      containerRef.current.style.minHeight = `${metricsRef.current.height + 20}px`;
+
+      if (playRef.current) {
+        metricsRef.current = computeMetrics(
+          playRef.current,
+          containerWidthRef.current,
+          containerRef.current?.clientHeight || DEFAULT_METRICS.height,
+        );
+        gameRef.current.scale.resize(metricsRef.current.width, metricsRef.current.height);
+        const scene = gameRef.current.scene.getScene("BoardScene");
+        if (scene?.events) {
+          scene.events.emit("metrics-changed", metricsRef.current);
+          scene.events.emit("render-play", playRef.current);
+        }
+        containerRef.current.style.minHeight = `${metricsRef.current.height + 20}px`;
+      }
+    })();
+
+    return () => {
+      canceled = true;
+      window.removeEventListener("resize", resizeMetrics);
+      gameRef.current?.destroy(true);
+      gameRef.current = null;
+      phaserRef.current = null;
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!containerRef.current || !gameRef.current) {
+      return;
+    }
+    containerWidthRef.current = containerRef.current.clientWidth || DEFAULT_METRICS.width;
+    metricsRef.current = computeMetrics(
+      play,
+      containerWidthRef.current,
+      containerRef.current?.clientHeight || DEFAULT_METRICS.height,
+    );
+    gameRef.current.scale.resize(metricsRef.current.width, metricsRef.current.height);
+    const scene = gameRef.current.scene.getScene("BoardScene");
+    if (scene?.events) {
+      scene.events.emit("metrics-changed", metricsRef.current);
+      if (play) {
+        scene.events.emit("render-play", play);
+      }
+    }
+    const canvas = gameRef.current.canvas;
+    canvas.style.width = `${metricsRef.current.width}px`;
+    canvas.style.height = `${metricsRef.current.height}px`;
+    canvas.style.maxWidth = "100%";
+    canvas.style.margin = "0 auto";
+    containerRef.current.style.minHeight = `${metricsRef.current.height + 20}px`;
+  }, [play]);
+
+  return <div ref={containerRef} />;
+}

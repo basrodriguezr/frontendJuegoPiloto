@@ -1,0 +1,27 @@
+## Checklist - Flujo secuencial y packs con premios
+
+- [x] Definir estados de UI: `splash` -> `menu` -> `bet` -> `play` (solo una vista activa).
+- [x] Reestructurar `src/app/page.tsx` para mostrar:
+  - [x] Splash con logo y barra de carga.
+  - [x] Menu con seleccion nivel/pack y pack size (sin tablero).
+  - [x] Seleccion de monto con selector +/- y visualizacion del monto.
+  - [x] Pantalla play:
+    - [x] Si mode != pack: HUD + tablero Phaser.
+    - [x] Si mode = pack: grilla de tickets mostrando solo premios; botones de abrir ticket y "Abrir todos"; replay abre modal con PhaserBoard.
+  - [x] Replay modal con cerrar y retorno a la lista.
+  - [x] Botones "Reglas del juego" e "Informacion" con modales separados.
+- [x] Seleccion de nivel para pack (nivel1 / nivel2) antes de generar tickets.
+- [x] Anadir flujo inspirado en referencia:
+  - [x] Splash de carga con logo (pantalla 1).
+  - [x] Menu con pozos (mayor/menor) y modos (pantalla 2).
+  - [x] Seleccion de monto fijo antes de Play (pantalla 3).
+  - [x] Play: nivel 1 con tablero reducido; nivel 2 tablero completo; packs muestran matriz de tickets con premios (gris = pierde, color = gana) y boton de replay modal/pestana (pantalla 4/5).
+- [x] Estilos en `src/app/page.module.css`:
+  - [x] Layout para pasos secuenciales y estados de carga.
+  - [x] Grilla de pack con placeholders (?) antes de play y premios despues.
+  - [x] Modal centrado para replay.
+- [x] Ajustar logica de pack:
+  - [x] En modo pack, ocultar jugada principal; solo mostrar grilla de premios.
+  - [x] Boton Play pack actualiza grilla; replay abre modal/pestana.
+  - [x] Boton "Abrir todos" revela los tickets restantes.
+- [ ] Probar flujo completo (splash -> menu -> monto -> play nivel1/nivel2/pack) y validar modal.
