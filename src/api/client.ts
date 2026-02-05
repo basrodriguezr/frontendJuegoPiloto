@@ -136,7 +136,10 @@ async function wsRequest<TResponse, TPayload = unknown>(
       pending.delete(requestId);
       reject(new Error("WebSocket request timed out."));
     }, timeoutMs);
-    pending.set(requestId, { resolve, reject, timeoutId });
+    const wrappedResolve = (value: unknown) => {
+      resolve(value as TResponse);
+    };
+    pending.set(requestId, { resolve: wrappedResolve, reject, timeoutId });
     ws.send(JSON.stringify(message));
   });
 }
