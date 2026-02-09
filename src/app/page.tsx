@@ -309,6 +309,7 @@ export default function Home() {
   const rulesPages = config?.symbolPaytable ?? [];
   const rulesTotal = rulesPages.length;
   const activeRule = rulesTotal > 0 ? rulesPages[rulesIndex % rulesTotal] : null;
+  const activeRuleMatches = activeRule?.matches.filter((rule) => rule.count >= 3) ?? [];
   const ruleStyle = activeRule
     ? {
       background: `linear-gradient(135deg, ${activeRule.color}cc, ${activeRule.color}22)`,
@@ -356,7 +357,7 @@ export default function Home() {
           <li>Seleccione el importe del ticket usando los botones “+” y “-”.</li>
           <li>Presione el botón "Play" (representado por un triángulo ►).</li>
           <li>El importe se descontará automáticamente de su saldo.</li>
-          <li>Si encuentra 3 símbolos iguales, gana el premio de acuerdo a la tabla de pagos disponible en el juego</li>
+          <li>Si encuentra 3 o más símbolos iguales, gana el premio de acuerdo a la tabla de pagos disponible en el juego</li>
           <li>
             Si encuentra el símbolo de bonus, activará la característica de bonificación. En la ronda de bonificación,
             debe dispara el cañón para hundir un barco y ganar el importe mostrado.
@@ -892,7 +893,7 @@ export default function Home() {
                   {activeRule.label}
                 </div>
                 <div className={styles.rulesList}>
-                  {activeRule.matches.map((rule) => (
+                  {activeRuleMatches.map((rule) => (
                     <div key={rule.count} className={styles.rulesRow}>
                       <span className={styles.rulesCount}>{rule.count} simbolos coincidentes</span>
                       <span className={styles.rulesMultiplier}>X {rule.multiplier.toFixed(1)}</span>
