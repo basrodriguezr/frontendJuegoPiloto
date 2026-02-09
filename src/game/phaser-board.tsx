@@ -434,6 +434,8 @@ export function PhaserBoard({ play, symbolPaytable }: Props) {
   const containerWidthRef = useRef<number>(DEFAULT_METRICS.width);
   const playRef = useRef<PlayOutcome | undefined>(undefined);
   const symbolColorRef = useRef<Map<string, string>>(new Map());
+  const currentSize = pickBoardSize(play);
+  const aspectRatio = Math.max(0.5, currentSize.cols / Math.max(1, currentSize.rows));
 
   useEffect(() => {
     playRef.current = play;
@@ -492,8 +494,7 @@ export function PhaserBoard({ play, symbolPaytable }: Props) {
       gameRef.current = new Phaser.Game({
         type: Phaser.AUTO,
         scale: {
-          mode: Phaser.Scale.FIT,
-          autoCenter: Phaser.Scale.CENTER_BOTH,
+          mode: Phaser.Scale.NONE,
           width: metricsRef.current.width,
           height: metricsRef.current.height,
         },
@@ -563,5 +564,5 @@ export function PhaserBoard({ play, symbolPaytable }: Props) {
     containerRef.current.style.minHeight = `${metricsRef.current.height + 20}px`;
   }, [play]);
 
-  return <div ref={containerRef} />;
+  return <div ref={containerRef} style={{ width: "100%", aspectRatio: String(aspectRatio) }} />;
 }
