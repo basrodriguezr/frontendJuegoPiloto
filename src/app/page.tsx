@@ -12,6 +12,31 @@ import { startTelemetry } from "@/lib/telemetry";
 import styles from "./page.module.css";
 
 type UiStage = "splash" | "menu" | "bet" | "play";
+type BonusMode = Exclude<GameMode, "pack">;
+type BonusCellType = "prize" | "end";
+
+type BonusCell = {
+  id: string;
+  type: BonusCellType;
+  multiplier: number;
+  amount: number;
+  label: string;
+};
+
+type BonusSession = {
+  playId: string;
+  mode: BonusMode;
+  triggerCount: number;
+  round: number;
+  maxRounds: number;
+  prizeMultipliers: number[];
+  endCode: string;
+  cells: BonusCell[];
+  revealedIndex?: number;
+  revealedCell?: BonusCell;
+  totalWin: number;
+  history: BonusCell[];
+};
 
 const stateLabels: Record<GameState, string> = {
   MENU: "Menu listo",
@@ -24,6 +49,64 @@ const stateLabels: Record<GameState, string> = {
   REPLAY: "Replay",
   SUMMARY: "Resumen",
 };
+
+function shuffleCells<T>(items: T[]): T[] {
+  const clone = [...items];
+  for (let i = clone.length - 1; i > 0; i -= 1) {
+    const j = Math.floor(Math.random() * (i + 1));
+    const tmp = clone[i];
+    clone[i] = clone[j];
+    clone[j] = tmp;
+  }
+  return clone;
+}
+
+function pickDistinctMultipliers(pool: number[]): [number, number] {
+  const source = pool.length > 1 ? pool : [1, 2];
+  const first = source[Math.floor(Math.random() * source.length)] ?? source[0];
+  let second = source[Math.floor(Math.random() * source.length)] ?? source[0];
+  let guard = 0;
+  while (second === first && guard < 10) {
+    second = source[Math.floor(Math.random() * source.length)] ?? source[0];
+    guard += 1;
+  }
+  if (second === first) {
+    second = first + 1;
+  }
+  return [first, second];
+}
+
+function buildBonusCells(
+  playId: string,
+  round: number,
+  bet: number,
+  prizeMultipliers: number[],
+  endCode: string,
+): BonusCell[] {
+  const [m1, m2] = pickDistinctMultipliers(prizeMultipliers);
+  const prizeA: BonusCell = {
+    id: `${playId}-bonus-${round}-prize-a`,
+    type: "prize",
+    multiplier: m1,
+    amount: Math.round(bet * m1),
+    label: `Premio x${m1}`,
+  };
+  const prizeB: BonusCell = {
+    id: `${playId}-bonus-${round}-prize-b`,
+    type: "prize",
+    multiplier: m2,
+    amount: Math.round(bet * m2),
+    label: `Premio x${m2}`,
+  };
+  const endCell: BonusCell = {
+    id: `${playId}-bonus-${round}-end`,
+    type: "end",
+    multiplier: 0,
+    amount: 0,
+    label: endCode,
+  };
+  return shuffleCells([prizeA, prizeB, endCell]);
+}
 
 function asPlayOutcome(play: PackPlay): PlayOutcome {
   return {
@@ -43,6 +126,7 @@ export default function Home() {
   );
   const machineRef = useRef(createStateMachine("LOADING"));
   const splashDelayRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const endTicketDelayRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const [config, setConfig] = useState<GameConfig | null>(null);
   const [mode, setMode] = useState<GameMode>("nivel1");
@@ -61,6 +145,7 @@ export default function Home() {
   const [rulesOpen, setRulesOpen] = useState(false);
   const [rulesIndex, setRulesIndex] = useState(0);
   const [infoOpen, setInfoOpen] = useState(false);
+  const [bonusSession, setBonusSession] = useState<BonusSession | null>(null);
 
   const transition = useCallback((next: GameState) => {
     machineRef.current.transition(next);
@@ -97,6 +182,21 @@ export default function Home() {
     }
   }, []);
 
+  const clearEndTicketDelay = useCallback(() => {
+    if (endTicketDelayRef.current) {
+      clearTimeout(endTicketDelayRef.current);
+      endTicketDelayRef.current = null;
+    }
+  }, []);
+
+  const scheduleEndTicket = useCallback(
+    (delayMs: number) => {
+      clearEndTicketDelay();
+      endTicketDelayRef.current = setTimeout(() => transition("END_TICKET"), delayMs);
+    },
+    [clearEndTicketDelay, transition],
+  );
+
   const refreshConfig = useCallback(async () => {
     clearSplashDelay();
     setError(null);
@@ -132,19 +232,24 @@ export default function Home() {
     return () => {
       stopTelemetry();
       clearSplashDelay();
+      clearEndTicketDelay();
     };
-  }, [clearSplashDelay, refreshConfig]);
+  }, [clearEndTicketDelay, clearSplashDelay, refreshConfig]);
 
   useEffect(() => {
     setPackOutcome(undefined);
     setPackRevealed(0);
-  }, [bet, mode, packSize, packLevel]);
+    setBonusSession(null);
+    clearEndTicketDelay();
+  }, [bet, clearEndTicketDelay, mode, packSize, packLevel]);
 
   useEffect(() => {
     if (play) {
       setDisplayedWin(0);
+      setBonusSession(null);
+      clearEndTicketDelay();
     }
-  }, [play?.playId]);
+  }, [clearEndTicketDelay, play?.playId]);
 
   useEffect(() => {
     if (packOutcome) {
@@ -172,8 +277,45 @@ export default function Home() {
     };
   }, [mode, play?.playId]);
 
+  useEffect(() => {
+    if (!play || mode === "pack") {
+      return;
+    }
+    const unsubscribe = gameBus.on("game:bonus:triggered", ({ playId, bonusData }) => {
+      if (playId !== play.playId) return;
+      if (bonusSession) return;
+
+      const bonusMode = (bonusData?.mode ?? mode) as BonusMode;
+      const prizeMultipliers = bonusData?.prizeMultipliers?.length
+        ? bonusData.prizeMultipliers
+        : bonusMode === "nivel1"
+          ? [2, 3, 5, 8]
+          : [4, 6, 8, 10, 12, 16, 20, 30, 40];
+      const endCode = bonusData?.endCode ?? "TERMINO_DE_BONUS";
+      const maxRounds = Math.max(1, bonusData?.maxRounds ?? 25);
+      const cells = buildBonusCells(playId, 1, bet, prizeMultipliers, endCode);
+
+      setBonusSession({
+        playId,
+        mode: bonusMode,
+        triggerCount: bonusData?.triggerCount ?? 1,
+        round: 1,
+        maxRounds,
+        prizeMultipliers,
+        endCode,
+        cells,
+        totalWin: 0,
+        history: [],
+      });
+    });
+    return () => {
+      unsubscribe();
+    };
+  }, [bet, bonusSession, mode, play?.playId]);
+
   async function handlePlaySingle() {
     if (!config) return;
+    clearEndTicketDelay();
     setError(null);
     setLoadingText("Solicitando ticket....");
     transition("LOADING");
@@ -190,10 +332,14 @@ export default function Home() {
       setPlay(outcome);
       setPackOutcome(undefined);
       setPackRevealed(0);
+      setBonusSession(null);
       transition("REVEAL");
       gameBus.emit("game:play:completed", outcome);
       const cascadeDuration = 1200 + outcome.cascades.length * 1000;
-      setTimeout(() => transition("END_TICKET"), cascadeDuration);
+      const hasBonus = outcome.cascades.some((step) => step.bonus);
+      if (!hasBonus) {
+        scheduleEndTicket(cascadeDuration);
+      }
     } catch (err) {
       setError("No pudimos obtener el ticket.");
       transition("MENU");
@@ -269,7 +415,10 @@ export default function Home() {
   const totalWinLabel = moneyFormat
     ? formatMoney(displayedWin, moneyFormat)
     : `$${displayedWin.toLocaleString("es-CL")}`;
-  const bonusActive = play?.cascades.some((step) => step.bonus) ?? false;
+  const bonusTotalLabel = moneyFormat
+    ? formatMoney(bonusSession?.totalWin ?? 0, moneyFormat)
+    : `$${(bonusSession?.totalWin ?? 0).toLocaleString("es-CL")}`;
+  const bonusActive = Boolean(bonusSession);
 
   const packLevelLabel = packLevel === "nivel1" ? "Nivel 1" : "Nivel 2";
   const modeBadge =
@@ -324,6 +473,63 @@ export default function Home() {
   const goNextRule = () => {
     if (rulesTotal === 0) return;
     setRulesIndex((prev) => (prev + 1) % rulesTotal);
+  };
+
+  const onBonusPick = (cellIndex: number) => {
+    if (!bonusSession) return;
+    if (bonusSession.revealedCell) return;
+    const selected = bonusSession.cells[cellIndex];
+    if (!selected) return;
+
+    const history = [...bonusSession.history, selected];
+    if (selected.type === "prize") {
+      const amount = Math.max(0, selected.amount);
+      if (amount > 0) {
+        gameBus.emit("game:win:increment", { playId: bonusSession.playId, amount });
+      }
+
+      setBonusSession({
+        ...bonusSession,
+        totalWin: bonusSession.totalWin + amount,
+        revealedIndex: cellIndex,
+        revealedCell: selected,
+        history,
+      });
+      return;
+    }
+
+    setBonusSession({
+      ...bonusSession,
+      revealedIndex: cellIndex,
+      revealedCell: selected,
+      history,
+    });
+  };
+
+  const onBonusContinue = () => {
+    if (!bonusSession?.revealedCell) return;
+
+    if (bonusSession.revealedCell.type === "end" || bonusSession.round >= bonusSession.maxRounds) {
+      setBonusSession(null);
+      scheduleEndTicket(300);
+      return;
+    }
+
+    const nextRound = bonusSession.round + 1;
+    const cells = buildBonusCells(
+      bonusSession.playId,
+      nextRound,
+      bet,
+      bonusSession.prizeMultipliers,
+      bonusSession.endCode,
+    );
+    setBonusSession({
+      ...bonusSession,
+      round: nextRound,
+      cells,
+      revealedIndex: undefined,
+      revealedCell: undefined,
+    });
   };
 
   const rulesInfoContent = (
@@ -858,6 +1064,55 @@ export default function Home() {
         <div className={styles.loading}>
           <div className={styles.spinner} />
           <p>{loadingText}</p>
+        </div>
+      ) : null}
+      {bonusSession ? (
+        <div className={styles.bonusOverlay}>
+          <div className={styles.bonusPanel}>
+            <div className={styles.bonusHeader}>
+              <p className={styles.bonusTitle}>BONUS</p>
+              <span className={styles.chip}>Ronda {bonusSession.round}</span>
+            </div>
+            <p className={styles.bonusHint}>Selecciona una celda</p>
+            <div className={styles.bonusGrid}>
+              {bonusSession.cells.map((cell, idx) => (
+                <button
+                  key={cell.id}
+                  className={`${styles.bonusCell} ${bonusSession.revealedIndex === idx ? styles.bonusCellRevealed : ""}`}
+                  onClick={() => onBonusPick(idx)}
+                  type="button"
+                  disabled={Boolean(bonusSession.revealedCell)}
+                >
+                  <span className={styles.bonusCellTop}>Objetivo {idx + 1}</span>
+                  <span className={styles.bonusCellBottom}>
+                    {bonusSession.revealedIndex === idx
+                      ? cell.type === "prize"
+                        ? `Ganaste ${moneyFormat ? formatMoney(cell.amount, moneyFormat) : `$${cell.amount.toLocaleString("es-CL")}`}`
+                        : bonusSession.endCode
+                      : "Tap / Click"}
+                  </span>
+                </button>
+              ))}
+            </div>
+            {bonusSession.revealedCell ? (
+              <div className={styles.bonusResult}>
+                {bonusSession.revealedCell.type === "prize" ? (
+                  <p className={styles.bonusHint}>
+                    Premio encontrado. Puedes seguir intentando otro tiro.
+                  </p>
+                ) : (
+                  <p className={styles.bonusHint}>Encontraste {bonusSession.endCode}. El bonus termina.</p>
+                )}
+                <button className={styles.primary} onClick={onBonusContinue} type="button">
+                  {bonusSession.revealedCell.type === "prize" ? "Seguir bonus" : "Cerrar bonus"}
+                </button>
+              </div>
+            ) : null}
+            <div className={styles.bonusStats}>
+              <span>Acumulado bonus: {bonusTotalLabel}</span>
+              <span>Trigger: {bonusSession.triggerCount}</span>
+            </div>
+          </div>
         </div>
       ) : null}
       {replayModal ? (

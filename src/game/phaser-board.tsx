@@ -237,6 +237,13 @@ function createBoardScene(
       const stepWin = step.winStep ?? 0;
       const removalDuration = 520;
 
+      if (step.bonus && this.currentPlay?.playId) {
+        gameBus.emit("game:bonus:triggered", {
+          playId: this.currentPlay.playId,
+          bonusData: step.bonusData,
+        });
+      }
+
       step.removeCells.forEach((cell) => {
         const sprite = this.cellMap.get(`${cell.row}-${cell.col}`);
         if (sprite) {

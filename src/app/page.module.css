@@ -641,6 +641,110 @@
   overflow: auto;
 }
 
+.bonusOverlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(4, 10, 20, 0.78);
+  display: grid;
+  place-items: center;
+  padding: 16px;
+  z-index: 55;
+}
+
+.bonusPanel {
+  width: min(92vw, 640px);
+  background: linear-gradient(145deg, rgba(8, 14, 28, 0.96), rgba(5, 10, 20, 0.96));
+  border: 1px solid var(--border);
+  border-radius: 16px;
+  padding: 16px;
+  display: grid;
+  gap: 12px;
+}
+
+.bonusHeader {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+}
+
+.bonusTitle {
+  margin: 0;
+  font-size: 24px;
+  font-weight: 800;
+  letter-spacing: 0.06em;
+}
+
+.bonusHint {
+  margin: 0;
+  color: var(--muted);
+  font-size: 14px;
+}
+
+.bonusGrid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(120px, 1fr));
+  gap: 12px;
+}
+
+.bonusCell {
+  border-radius: 14px;
+  border: 1px solid var(--border);
+  background: linear-gradient(160deg, rgba(56, 189, 248, 0.18), rgba(14, 165, 233, 0.06));
+  color: var(--text);
+  min-height: 120px;
+  display: grid;
+  align-content: center;
+  justify-items: center;
+  gap: 6px;
+  cursor: pointer;
+  transition:
+    transform 0.12s ease,
+    box-shadow 0.12s ease,
+    border-color 0.12s ease;
+}
+
+.bonusCell:hover {
+  transform: translateY(-1px);
+  border-color: var(--accent);
+  box-shadow: 0 10px 28px rgba(14, 165, 233, 0.24);
+}
+
+.bonusCell:disabled {
+  cursor: default;
+}
+
+.bonusCellRevealed {
+  border-color: var(--accent);
+  background: linear-gradient(160deg, rgba(56, 189, 248, 0.28), rgba(14, 165, 233, 0.14));
+  box-shadow: 0 10px 28px rgba(14, 165, 233, 0.18);
+}
+
+.bonusCellTop {
+  font-size: 14px;
+  font-weight: 700;
+}
+
+.bonusCellBottom {
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.bonusStats {
+  display: flex;
+  justify-content: space-between;
+  gap: 10px;
+  flex-wrap: wrap;
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.bonusResult {
+  display: grid;
+  gap: 10px;
+  justify-items: start;
+}
+
 .rulesOverlay {
   position: fixed;
   inset: 0;
@@ -944,5 +1048,9 @@
 
   .rulesInfo {
     max-height: 260px;
+  }
+
+  .bonusGrid {
+    grid-template-columns: 1fr;
   }
 }

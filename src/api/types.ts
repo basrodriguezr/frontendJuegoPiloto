@@ -96,6 +96,13 @@ export interface CascadeStep {
   winStep: number;
   gridAfter?: string[][];
   bonus?: boolean;
+  bonusData?: {
+    mode: Exclude<GameMode, "pack">;
+    triggerCount: number;
+    prizeMultipliers: number[];
+    endCode: string;
+    maxRounds: number;
+  };
 }
 
 export interface PlayOutcome {
