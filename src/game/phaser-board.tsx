@@ -263,11 +263,65 @@ function createBoardScene(
         }
         const rows = this.boardSize.rows;
         const cols = this.boardSize.cols;
-        const dropDistance = this.metrics.cellSize * (rows + 1);
         const nextGrid = step.gridAfter ?? this.grid;
         this.grid = normalizeGrid(nextGrid, rows, cols);
         this.getBoardOffsets();
 
+        if (this.currentPlay?.mode === "nivel1") {
+          const newMap = new Map<string, Phaser.GameObjects.Container>();
+          const appearDuration = 280;
+
+          for (let row = 0; row < rows; row += 1) {
+            for (let col = 0; col < cols; col += 1) {
+              const key = `${row}-${col}`;
+              const existing = this.cellMap.get(key);
+              const { x, y } = this.getCellPosition(row, col);
+
+              if (!removeSet.has(key) && existing) {
+                existing.setPosition(x, y);
+                existing.setScale(1);
+                existing.setAlpha(1);
+                existing.setData("row", row);
+                existing.setData("col", col);
+                newMap.set(key, existing);
+                continue;
+              }
+
+              const container = this.createCellContainer(this.grid[row][col], x, y);
+              container.setAlpha(0);
+              container.setScale(0.85);
+              container.setData("row", row);
+              container.setData("col", col);
+              newMap.set(key, container);
+
+              this.tweens.add({
+                targets: container,
+                alpha: 1,
+                scale: 1,
+                duration: appearDuration,
+                ease: "Cubic.easeOut",
+              });
+            }
+          }
+
+          this.cellMap.forEach((container, key) => {
+            if (newMap.get(key) !== container) {
+              container.destroy();
+            }
+          });
+          this.cellMap.clear();
+          newMap.forEach((value, key) => this.cellMap.set(key, value));
+
+          if (stepWin === 0) {
+            this.header?.setText(
+              `Play ${this.currentPlay?.playId ?? ""} - Paso ${stepIndex + 1}/${totalSteps} - Win ${this.accumulatedWin}`,
+            );
+          }
+          this.time.delayedCall(appearDuration + 120, onComplete);
+          return;
+        }
+
+        const dropDistance = this.metrics.cellSize * (rows + 1);
         const newMap = new Map<string, Phaser.GameObjects.Container>();
         const dropDuration = 480;
 

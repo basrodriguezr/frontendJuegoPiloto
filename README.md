@@ -32,7 +32,7 @@ npm run start   # servir el build de Next en modo produccion
 ## Docker (local y VM)
 Este proyecto usa fuentes locales (`@fontsource`) para evitar descargas en build y funciona sin acceso a Google Fonts.
 
-### Build y run local
+### Build y run local (sin Docker Compose)
 ```bash
 docker build -t piloto-app .
 docker run -d --name piloto-app -p 3000:3000 piloto-app
@@ -57,7 +57,7 @@ El backend vive en `../backend/` y expone:
 - **Persistencia**: tablas `users`, `game_configs`, `plays`, `pack_plays`.
 - **Migraciones**: `../backend/sql/001_init.sql` + runner `npm run migrate`.
 - **Docker**: imagen backend con migraciones al iniciar.
-- **Compose**: stack completo frontend + backend + postgres.
+- **Compose (opcional)**: stack completo frontend + backend + postgres.
 
 ### Ejecutar backend local (sin Docker)
 ```bash
@@ -70,7 +70,8 @@ npm run seed
 npm run dev
 ```
 
-## Docker Compose (frontend + backend + postgres)
+## Docker Compose (opcional)
+No se usa en el despliegue actual de la VM, pero puede servir en local.
 ```bash
 cd ..
 docker compose up --build
@@ -126,9 +127,8 @@ Si la VM esta en NAT, configura port forwarding:
 Luego abre en el host: `http://127.0.0.1:3000`
 
 ## Deploy con GitHub Actions (self-hosted runner en la VM)
-El workflow esta en: `.github/workflows/deploy.yml`.
-Despliega localmente en la VM (sin SSH) y ejecuta Docker Compose:
-- `docker compose up -d --build`
+El workflow esta en: `.github/workflows/deploy-dev.yml`.
+Despliega localmente en la VM (sin SSH) usando `docker build` + `docker run`.
 
 Pasos resumidos:
 1) Instalar runner en la VM y dejarlo **online**.
