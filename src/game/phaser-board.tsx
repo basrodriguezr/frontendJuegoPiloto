@@ -84,15 +84,19 @@ function computeMetrics(play: PlayOutcome | undefined, containerWidth: number, c
   const cols = Math.max(1, size.cols);
 
   const safeWidth = containerWidth > 0 ? containerWidth : DEFAULT_METRICS.width;
+  const safeHeight = containerHeight && containerHeight > 0 ? containerHeight : DEFAULT_METRICS.height;
   const padding = safeWidth >= 640 ? 12 : 8;
   const gap = 2;
+  const offsetY = 32;
 
-  const usable = Math.max(120, safeWidth - padding * 2 - gap * (cols - 1));
-  const rawCell = cols > 0 ? usable / cols : DEFAULT_METRICS.cellSize;
+  const usableByWidth = Math.max(120, safeWidth - padding * 2 - gap * (cols - 1));
+  const usableByHeight = Math.max(120, safeHeight - offsetY - padding * 2 - gap * (rows - 1));
+  const rawCellByWidth = cols > 0 ? usableByWidth / cols : DEFAULT_METRICS.cellSize;
+  const rawCellByHeight = rows > 0 ? usableByHeight / rows : DEFAULT_METRICS.cellSize;
+  const rawCell = Math.min(rawCellByWidth, rawCellByHeight);
   const cellSize = Math.min(72, Math.max(20, rawCell));
 
   const width = padding * 2 + cols * cellSize + gap * (cols - 1);
-  const offsetY = 32;
   const height = offsetY + rows * cellSize + gap * (rows - 1) + padding;
 
   return { cellSize, gap, offsetY, padding, width, height, rows, cols };
