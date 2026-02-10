@@ -2,11 +2,12 @@
 
 import { useEffect, useRef } from "react";
 import type * as PhaserTypes from "phaser";
-import type { PlayOutcome, SymbolPaytableEntry } from "@/api/types";
+import type { GameMode, PlayOutcome, SymbolPaytableEntry } from "@/api/types";
 import { gameBus } from "@/game/events";
 
 type Props = {
   play?: PlayOutcome;
+  mode?: GameMode;
   symbolPaytable?: SymbolPaytableEntry[];
 };
 
@@ -36,18 +37,31 @@ const DEFAULT_METRICS: BoardMetrics = {
 const BONUS_TRIGGER_SYMBOL = "N";
 const BONUS_HIGHLIGHT_LIMIT = 3;
 const MATCH_CONTOUR_DURATION = 340;
+const LEVEL_ONE_PREVIEW_SIZE = { rows: 3, cols: 5 };
+const LEVEL_TWO_PREVIEW_SIZE = { rows: 7, cols: 5 };
 
-function pickBoardSize(play: PlayOutcome | undefined): { rows: number; cols: number } {
+function pickBoardSize(play: PlayOutcome | undefined, mode?: GameMode): { rows: number; cols: number } {
   if (play?.grid0?.length && play.grid0[0]?.length) {
     return { rows: play.grid0.length, cols: play.grid0[0].length };
   }
-  return { rows: DEFAULT_METRICS.rows, cols: DEFAULT_METRICS.cols };
+  if (mode === "nivel1") {
+    return LEVEL_ONE_PREVIEW_SIZE;
+  }
+  return LEVEL_TWO_PREVIEW_SIZE;
 }
 
 function normalizeGrid(grid: string[][], rows: number, cols: number): string[][] {
   const safeGrid = Array.isArray(grid) ? grid : [];
   return Array.from({ length: rows }, (_, r) =>
     Array.from({ length: cols }, (_, c) => safeGrid[r]?.[c] ?? ""),
+  );
+}
+
+function buildPreviewGrid(rows: number, cols: number, symbols: string[]): string[][] {
+  const fallback = ["A", "B", "C", "D", "E", "G", "K", "M"];
+  const pool = symbols.length > 0 ? symbols : fallback;
+  return Array.from({ length: rows }, () =>
+    Array.from({ length: cols }, () => pool[Math.floor(Math.random() * pool.length)] ?? pool[0] ?? "A"),
   );
 }
 
@@ -81,8 +95,13 @@ function lightenColor({ r, g, b }: { r: number; g: number; b: number }, amount: 
   );
 }
 
-function computeMetrics(play: PlayOutcome | undefined, containerWidth: number, containerHeight?: number): BoardMetrics {
-  const size = pickBoardSize(play);
+function computeMetrics(
+  play: PlayOutcome | undefined,
+  containerWidth: number,
+  containerHeight?: number,
+  mode?: GameMode,
+): BoardMetrics {
+  const size = pickBoardSize(play, mode);
   const rows = Math.max(1, size.rows);
   const cols = Math.max(1, size.cols);
 
@@ -109,12 +128,14 @@ function createBoardScene(
   Phaser: PhaserModule,
   getMetrics: () => BoardMetrics,
   getInitialPlay: () => PlayOutcome | undefined,
+  getPreviewMode: () => GameMode | undefined,
+  getPreviewSymbols: () => string[],
   getSymbolColor: (symbol: string) => string,
 ) {
   return class BoardScene extends Phaser.Scene {
     private cellMap = new Map<string, Phaser.GameObjects.Container>();
     private grid?: string[][];
-    private boardSize = pickBoardSize(undefined);
+    private boardSize = pickBoardSize(undefined, getPreviewMode());
     private header?: Phaser.GameObjects.Text;
     private metrics: BoardMetrics = getMetrics();
     private currentPlay?: PlayOutcome;
@@ -136,10 +157,15 @@ function createBoardScene(
       this.events.on("render-play", (play: PlayOutcome) => {
         this.renderPlay(play);
       });
+      this.events.on("clear-play", () => {
+        this.clearBoard();
+      });
 
       const initialPlay = getInitialPlay();
       if (initialPlay) {
         this.renderPlay(initialPlay);
+      } else {
+        this.clearBoard();
       }
 
       this.events.on("metrics-changed", (metrics: BoardMetrics) => {
@@ -147,6 +173,50 @@ function createBoardScene(
         if (this.grid) {
           this.drawGrid(this.grid);
         }
+      });
+    }
+
+    private clearBoard() {
+      this.time.removeAllEvents();
+      this.tweens.killAll();
+      this.currentPlay = undefined;
+      this.accumulatedWin = 0;
+      const previewMode = getPreviewMode();
+      const size = pickBoardSize(undefined, previewMode);
+      this.boardSize = { rows: Math.max(1, size.rows), cols: Math.max(1, size.cols) };
+      const previewGrid =
+        previewMode === "nivel1"
+          ? buildPreviewGrid(this.boardSize.rows, this.boardSize.cols, getPreviewSymbols())
+          : normalizeGrid([], this.boardSize.rows, this.boardSize.cols);
+      this.grid = previewGrid;
+      this.header?.setText(previewMode === "nivel1" ? "Nivel 1 listo" : "Esperando ticket");
+      this.drawGrid(previewGrid);
+      if (previewMode === "nivel1") {
+        this.playBoardIntro();
+      }
+    }
+
+    private playBoardIntro() {
+      const ordered = Array.from(this.cellMap.entries())
+        .sort((a, b) => {
+          const [rowA, colA] = a[0].split("-").map((value) => Number(value));
+          const [rowB, colB] = b[0].split("-").map((value) => Number(value));
+          if (rowA !== rowB) return rowA - rowB;
+          return colA - colB;
+        })
+        .map((entry) => entry[1]);
+
+      ordered.forEach((container, idx) => {
+        container.setAlpha(0);
+        container.setScale(0.82);
+        this.tweens.add({
+          targets: container,
+          alpha: 1,
+          scale: 1,
+          duration: 260,
+          delay: idx * 40,
+          ease: "Back.easeOut",
+        });
       });
     }
 
@@ -814,20 +884,25 @@ function createBoardScene(
   };
 }
 
-export function PhaserBoard({ play, symbolPaytable }: Props) {
+export function PhaserBoard({ play, mode, symbolPaytable }: Props) {
   const containerRef = useRef<HTMLDivElement | null>(null);
   const gameRef = useRef<PhaserTypes.Game | null>(null);
   const phaserRef = useRef<PhaserModule | null>(null);
   const metricsRef = useRef<BoardMetrics>(DEFAULT_METRICS);
   const containerWidthRef = useRef<number>(DEFAULT_METRICS.width);
   const playRef = useRef<PlayOutcome | undefined>(undefined);
+  const modeRef = useRef<GameMode | undefined>(mode);
   const symbolColorRef = useRef<Map<string, string>>(new Map());
-  const currentSize = pickBoardSize(play);
+  const currentSize = pickBoardSize(play, mode);
   const aspectRatio = Math.max(0.5, currentSize.cols / Math.max(1, currentSize.rows));
 
   useEffect(() => {
     playRef.current = play;
   }, [play]);
+
+  useEffect(() => {
+    modeRef.current = mode;
+  }, [mode]);
 
   useEffect(() => {
     const map = new Map<string, string>();
@@ -850,9 +925,10 @@ export function PhaserBoard({ play, symbolPaytable }: Props) {
       if (!containerRef.current || !gameRef.current) return;
       containerWidthRef.current = containerRef.current.clientWidth || DEFAULT_METRICS.width;
       metricsRef.current = computeMetrics(
-        undefined,
+        playRef.current,
         containerWidthRef.current,
         containerRef.current?.clientHeight || DEFAULT_METRICS.height,
+        modeRef.current,
       );
       gameRef.current.scale.resize(metricsRef.current.width, metricsRef.current.height);
       const scene = gameRef.current.scene.getScene("BoardScene");
@@ -868,14 +944,17 @@ export function PhaserBoard({ play, symbolPaytable }: Props) {
       phaserRef.current = Phaser;
       containerWidthRef.current = containerRef.current.clientWidth || DEFAULT_METRICS.width;
       metricsRef.current = computeMetrics(
-        undefined,
+        playRef.current,
         containerWidthRef.current,
-        containerRef.current?.clientHeight || DEFAULT_METRICS.height
+        containerRef.current?.clientHeight || DEFAULT_METRICS.height,
+        modeRef.current,
       );
       const BoardScene = createBoardScene(
         Phaser,
         () => metricsRef.current,
         () => playRef.current,
+        () => modeRef.current,
+        () => Array.from(symbolColorRef.current.keys()),
         (symbol) => symbolColorRef.current.get(symbol) ?? "#e2e8f0",
       );
 
@@ -906,6 +985,7 @@ export function PhaserBoard({ play, symbolPaytable }: Props) {
           playRef.current,
           containerWidthRef.current,
           containerRef.current?.clientHeight || DEFAULT_METRICS.height,
+          modeRef.current,
         );
         gameRef.current.scale.resize(metricsRef.current.width, metricsRef.current.height);
         const scene = gameRef.current.scene.getScene("BoardScene");
@@ -935,6 +1015,7 @@ export function PhaserBoard({ play, symbolPaytable }: Props) {
       play,
       containerWidthRef.current,
       containerRef.current?.clientHeight || DEFAULT_METRICS.height,
+      mode,
     );
     gameRef.current.scale.resize(metricsRef.current.width, metricsRef.current.height);
     const scene = gameRef.current.scene.getScene("BoardScene");
@@ -942,6 +1023,8 @@ export function PhaserBoard({ play, symbolPaytable }: Props) {
       scene.events.emit("metrics-changed", metricsRef.current);
       if (play) {
         scene.events.emit("render-play", play);
+      } else {
+        scene.events.emit("clear-play");
       }
     }
     const canvas = gameRef.current.canvas;
@@ -950,7 +1033,7 @@ export function PhaserBoard({ play, symbolPaytable }: Props) {
     canvas.style.maxWidth = "100%";
     canvas.style.margin = "0 auto";
     containerRef.current.style.minHeight = `${metricsRef.current.height + 20}px`;
-  }, [play]);
+  }, [mode, play]);
 
   return <div ref={containerRef} style={{ width: "100%", aspectRatio: String(aspectRatio) }} />;
 }

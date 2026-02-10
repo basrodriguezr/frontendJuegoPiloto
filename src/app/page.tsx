@@ -1100,7 +1100,7 @@ export default function Home() {
                 </>
               ) : (
                 <div className={styles.boardShell}>
-                  <PhaserBoard play={boardPlay} symbolPaytable={config?.symbolPaytable} />
+                  <PhaserBoard play={boardPlay} mode={mode} symbolPaytable={config?.symbolPaytable} />
                 </div>
               )}
             </article>
@@ -1176,7 +1176,7 @@ export default function Home() {
               </button>
             </div>
             <div className={styles.modalBody}>
-              <PhaserBoard play={replayModal} symbolPaytable={config?.symbolPaytable} />
+              <PhaserBoard play={replayModal} mode={replayModal.mode} symbolPaytable={config?.symbolPaytable} />
             </div>
           </div>
         </div>
