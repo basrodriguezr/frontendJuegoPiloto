@@ -206,22 +206,24 @@ function createBoardScene(
       const flashColor = lightenColor(symbolRgb, 0.55);
       const sparkColor = lightenColor(symbolRgb, 0.35);
 
-      const flash = this.add.circle(centerX, centerY, Math.max(8, cellSize * 0.12), flashColor, 0.85);
+      const flash = this.add.circle(centerX, centerY, Math.max(10, cellSize * 0.2), flashColor, 0.9);
       flash.setBlendMode(Phaser.BlendModes.ADD);
+      flash.setDepth(1000);
       this.tweens.add({
         targets: flash,
-        scale: 3.2,
+        scale: 2.4,
         alpha: 0,
-        duration: 220,
+        duration: 280,
         ease: "Cubic.easeOut",
         onComplete: () => flash.destroy(),
       });
 
-      const sparks = Array.from({ length: 10 }).map((_, idx) => {
-        const angle = (Math.PI * 2 * idx) / 10;
-        const spark = this.add.circle(centerX, centerY, Math.max(2, cellSize * 0.04), sparkColor, 0.95);
+      const sparks = Array.from({ length: 16 }).map((_, idx) => {
+        const angle = (Math.PI * 2 * idx) / 16;
+        const spark = this.add.circle(centerX, centerY, Math.max(3, cellSize * 0.06), sparkColor, 0.98);
         spark.setBlendMode(Phaser.BlendModes.ADD);
-        const distance = cellSize * (0.26 + Math.random() * 0.24);
+        spark.setDepth(1001);
+        const distance = cellSize * (0.3 + Math.random() * 0.35);
         const targetX = centerX + Math.cos(angle) * distance;
         const targetY = centerY + Math.sin(angle) * distance;
         this.tweens.add({
@@ -229,20 +231,35 @@ function createBoardScene(
           x: targetX,
           y: targetY,
           alpha: 0,
-          scale: 0.2,
-          duration: 260 + Math.floor(Math.random() * 80),
+          scale: 0.35,
+          duration: 320 + Math.floor(Math.random() * 120),
           ease: "Cubic.easeOut",
           onComplete: () => spark.destroy(),
         });
         return spark;
       });
 
-      this.time.delayedCall(420, () => {
+      const ring = this.add.circle(centerX, centerY, Math.max(8, cellSize * 0.14), flashColor, 0.22);
+      ring.setStrokeStyle(Math.max(2, cellSize * 0.04), flashColor, 0.7);
+      ring.setDepth(1000);
+      this.tweens.add({
+        targets: ring,
+        scale: 2.6,
+        alpha: 0,
+        duration: 360,
+        ease: "Cubic.easeOut",
+        onComplete: () => ring.destroy(),
+      });
+
+      this.time.delayedCall(600, () => {
         sparks.forEach((spark) => {
           if (spark.active) {
             spark.destroy();
           }
         });
+        if (ring.active) {
+          ring.destroy();
+        }
       });
     }
 
