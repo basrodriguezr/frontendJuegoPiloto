@@ -57,14 +57,6 @@ function normalizeGrid(grid: string[][], rows: number, cols: number): string[][]
   );
 }
 
-function buildPreviewGrid(rows: number, cols: number, symbols: string[]): string[][] {
-  const fallback = ["A", "B", "C", "D", "E", "G", "K", "M"];
-  const pool = symbols.length > 0 ? symbols : fallback;
-  return Array.from({ length: rows }, () =>
-    Array.from({ length: cols }, () => pool[Math.floor(Math.random() * pool.length)] ?? pool[0] ?? "A"),
-  );
-}
-
 function hexToRgb(hex: string): { r: number; g: number; b: number } {
   const safe = hex.replace("#", "");
   const parsed = safe.length === 3
@@ -129,7 +121,6 @@ function createBoardScene(
   getMetrics: () => BoardMetrics,
   getInitialPlay: () => PlayOutcome | undefined,
   getPreviewMode: () => GameMode | undefined,
-  getPreviewSymbols: () => string[],
   getSymbolColor: (symbol: string) => string,
 ) {
   return class BoardScene extends Phaser.Scene {
@@ -184,40 +175,10 @@ function createBoardScene(
       const previewMode = getPreviewMode();
       const size = pickBoardSize(undefined, previewMode);
       this.boardSize = { rows: Math.max(1, size.rows), cols: Math.max(1, size.cols) };
-      const previewGrid =
-        previewMode === "nivel1"
-          ? buildPreviewGrid(this.boardSize.rows, this.boardSize.cols, getPreviewSymbols())
-          : normalizeGrid([], this.boardSize.rows, this.boardSize.cols);
-      this.grid = previewGrid;
-      this.header?.setText(previewMode === "nivel1" ? "Nivel 1 listo" : "Esperando ticket");
-      this.drawGrid(previewGrid);
-      if (previewMode === "nivel1") {
-        this.playBoardIntro();
-      }
-    }
-
-    private playBoardIntro() {
-      const ordered = Array.from(this.cellMap.entries())
-        .sort((a, b) => {
-          const [rowA, colA] = a[0].split("-").map((value) => Number(value));
-          const [rowB, colB] = b[0].split("-").map((value) => Number(value));
-          if (rowA !== rowB) return rowA - rowB;
-          return colA - colB;
-        })
-        .map((entry) => entry[1]);
-
-      ordered.forEach((container, idx) => {
-        container.setAlpha(0);
-        container.setScale(0.82);
-        this.tweens.add({
-          targets: container,
-          alpha: 1,
-          scale: 1,
-          duration: 260,
-          delay: idx * 40,
-          ease: "Back.easeOut",
-        });
-      });
+      const emptyGrid = normalizeGrid([], this.boardSize.rows, this.boardSize.cols);
+      this.grid = emptyGrid;
+      this.header?.setText("Esperando ticket");
+      this.drawGrid(emptyGrid);
     }
 
     private getBoardOffsets() {
@@ -954,7 +915,6 @@ export function PhaserBoard({ play, mode, symbolPaytable }: Props) {
         () => metricsRef.current,
         () => playRef.current,
         () => modeRef.current,
-        () => Array.from(symbolColorRef.current.keys()),
         (symbol) => symbolColorRef.current.get(symbol) ?? "#e2e8f0",
       );
 
