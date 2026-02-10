@@ -181,6 +181,39 @@ function createBoardScene(
       this.drawGrid(emptyGrid);
     }
 
+    private playBoardIntro(): number {
+      const ordered = Array.from(this.cellMap.entries())
+        .sort((a, b) => {
+          const [rowA, colA] = a[0].split("-").map((value) => Number(value));
+          const [rowB, colB] = b[0].split("-").map((value) => Number(value));
+          if (rowA !== rowB) return rowA - rowB;
+          return colA - colB;
+        })
+        .map((entry) => entry[1]);
+
+      if (ordered.length === 0) {
+        return 0;
+      }
+
+      const stepDelay = 40;
+      const duration = 260;
+
+      ordered.forEach((container, idx) => {
+        container.setAlpha(0);
+        container.setScale(0.82);
+        this.tweens.add({
+          targets: container,
+          alpha: 1,
+          scale: 1,
+          duration,
+          delay: idx * stepDelay,
+          ease: "Back.easeOut",
+        });
+      });
+
+      return duration + (ordered.length - 1) * stepDelay;
+    }
+
     private getBoardOffsets() {
       const { cellSize, gap, offsetY } = this.metrics;
       const rows = this.boardSize.rows;
@@ -588,8 +621,9 @@ function createBoardScene(
       this.grid = normalizeGrid(play.grid0, this.boardSize.rows, this.boardSize.cols);
       this.header?.setText(`Play ${play.playId} - ${play.mode.toUpperCase()} - Win 0`);
       this.drawGrid(this.grid);
+      const introDuration = this.playBoardIntro();
 
-      const initialDelay = 800;
+      const initialDelay = Math.max(320, introDuration + 120);
       const runStep = (idx: number) => {
         if (!this.grid) {
           return;
