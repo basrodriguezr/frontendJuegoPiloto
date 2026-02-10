@@ -33,6 +33,9 @@ const DEFAULT_METRICS: BoardMetrics = {
   rows: 7,
   cols: 5,
 };
+const BONUS_TRIGGER_SYMBOL = "N";
+const BONUS_HIGHLIGHT_LIMIT = 3;
+const MATCH_CONTOUR_DURATION = 340;
 
 function pickBoardSize(play: PlayOutcome | undefined): { rows: number; cols: number } {
   if (play?.grid0?.length && play.grid0[0]?.length) {
@@ -193,7 +196,203 @@ function createBoardScene(
       });
       label.setOrigin(0.5);
 
-      return this.add.container(x, y, [rect, highlight, label]);
+      const container = this.add.container(x, y, [rect, highlight, label]);
+      container.setData("symbol", symbol);
+      return container;
+    }
+
+    private playBonusTriggerHighlight(
+      triggerCount: number,
+      triggerCells: Array<{ row: number; col: number }> | undefined,
+      onComplete: () => void,
+    ) {
+      if (!this.grid) {
+        onComplete();
+        return;
+      }
+
+      const requestedCount = Math.max(1, Math.min(BONUS_HIGHLIGHT_LIMIT, triggerCount || BONUS_HIGHLIGHT_LIMIT));
+      const explicitTargets: { row: number; col: number }[] = [];
+      const explicitKeys = new Set<string>();
+      (triggerCells ?? []).forEach((cell) => {
+        if (cell.row < 0 || cell.col < 0) return;
+        if (cell.row >= this.boardSize.rows || cell.col >= this.boardSize.cols) return;
+        if (this.grid?.[cell.row]?.[cell.col] !== BONUS_TRIGGER_SYMBOL) return;
+        const key = `${cell.row}-${cell.col}`;
+        if (explicitKeys.has(key)) return;
+        explicitKeys.add(key);
+        explicitTargets.push({ row: cell.row, col: cell.col });
+      });
+
+      let highlightTargets = explicitTargets.slice(0, requestedCount);
+      if (highlightTargets.length === 0) {
+        const fallbackTargets: { row: number; col: number }[] = [];
+        for (let row = 0; row < this.boardSize.rows; row += 1) {
+          for (let col = 0; col < this.boardSize.cols; col += 1) {
+            if (this.grid[row]?.[col] === BONUS_TRIGGER_SYMBOL) {
+              fallbackTargets.push({ row, col });
+            }
+          }
+        }
+        highlightTargets = fallbackTargets.slice(0, Math.min(requestedCount, fallbackTargets.length));
+      }
+
+      if (highlightTargets.length === 0) {
+        onComplete();
+        return;
+      }
+
+      const { cellSize } = this.metrics;
+
+      highlightTargets.forEach((cell, idx) => {
+        const key = `${cell.row}-${cell.col}`;
+        const container = this.cellMap.get(key);
+        if (!container) return;
+
+        const symbol = this.grid?.[cell.row]?.[cell.col] ?? container.getData("symbol") ?? BONUS_TRIGGER_SYMBOL;
+        const symbolRgb = hexToRgb(getSymbolColor(symbol));
+        const glowStroke = lightenColor(symbolRgb, 0.7);
+        const baseStroke = darkenColor(symbolRgb, 0.55);
+        const delay = idx * 120;
+
+        const rect = container.list[0] as Phaser.GameObjects.Rectangle | undefined;
+        const highlight = container.list[1] as Phaser.GameObjects.Rectangle | undefined;
+        const label = container.list[2] as Phaser.GameObjects.Text | undefined;
+        if (rect) {
+          rect.setStrokeStyle(4, glowStroke, 1);
+          rect.setFillStyle(lightenColor(symbolRgb, 0.15), 0.98);
+        }
+        if (highlight) {
+          highlight.setFillStyle(lightenColor(symbolRgb, 0.4), 0.65);
+        }
+        if (label) {
+          label.setColor("#fffdea");
+          label.setShadow(0, 0, "#fef08a", 16, true, true);
+          this.tweens.add({
+            targets: label,
+            scale: 1.35,
+            duration: 180,
+            delay,
+            yoyo: true,
+            repeat: 4,
+            ease: "Sine.easeInOut",
+          });
+        }
+
+        this.tweens.add({
+          targets: container,
+          scale: 1.08,
+          duration: 180,
+          delay,
+          yoyo: true,
+          repeat: 4,
+          ease: "Sine.easeInOut",
+        });
+
+        const { x, y } = this.getCellPosition(cell.row, cell.col);
+        const badgeWidth = Math.max(30, Math.round(cellSize * 0.54));
+        const badgeHeight = Math.max(14, Math.round(cellSize * 0.24));
+        const badgeX = x + cellSize - badgeWidth / 2 - 2;
+        const badgeY = y + badgeHeight / 2 + 2;
+        const badgeBg = this.add.rectangle(0, 0, badgeWidth, badgeHeight, 0xfde047, 0.95);
+        badgeBg.setStrokeStyle(2, 0xfff7d6, 0.95);
+        badgeBg.setBlendMode(Phaser.BlendModes.ADD);
+        const badgeText = this.add.text(0, 0, "BONUS", {
+          fontFamily: "var(--font-geist-sans)",
+          fontSize: `${Math.max(9, Math.round(cellSize * 0.13))}px`,
+          color: "#062330",
+          fontStyle: "700",
+        });
+        badgeText.setOrigin(0.5);
+        badgeText.setShadow(0, 0, "#fef08a", 8, true, true);
+        const badge = this.add.container(badgeX, badgeY, [badgeBg, badgeText]);
+        badge.setDepth(1210);
+        badge.setAlpha(0);
+        badge.setScale(0.85);
+
+        this.tweens.add({
+          targets: badge,
+          alpha: 1,
+          scale: 1,
+          duration: 150,
+          delay,
+          ease: "Back.easeOut",
+        });
+        this.tweens.add({
+          targets: badge,
+          y: badgeY - 2,
+          duration: 180,
+          delay: delay + 150,
+          yoyo: true,
+          repeat: 4,
+          ease: "Sine.easeInOut",
+        });
+
+        const ring = this.add.rectangle(x + cellSize / 2, y + cellSize / 2, cellSize + 10, cellSize + 10);
+        ring.setStrokeStyle(3, glowStroke, 0.95);
+        ring.setFillStyle(glowStroke, 0.06);
+        ring.setBlendMode(Phaser.BlendModes.ADD);
+        ring.setDepth(1200);
+        this.tweens.add({
+          targets: ring,
+          alpha: 0.18,
+          scaleX: 1.2,
+          scaleY: 1.2,
+          duration: 180,
+          delay,
+          yoyo: true,
+          repeat: 4,
+          ease: "Sine.easeInOut",
+          onComplete: () => ring.destroy(),
+        });
+
+        const outerRing = this.add.rectangle(x + cellSize / 2, y + cellSize / 2, cellSize + 22, cellSize + 22);
+        outerRing.setStrokeStyle(2, glowStroke, 0.75);
+        outerRing.setFillStyle(0x000000, 0);
+        outerRing.setBlendMode(Phaser.BlendModes.ADD);
+        outerRing.setDepth(1190);
+        this.tweens.add({
+          targets: outerRing,
+          alpha: 0,
+          scaleX: 1.45,
+          scaleY: 1.45,
+          duration: 580,
+          delay,
+          ease: "Cubic.easeOut",
+          onComplete: () => outerRing.destroy(),
+        });
+
+        this.time.delayedCall(1200 + delay, () => {
+          if (rect?.active) {
+            rect.setStrokeStyle(2, baseStroke, 0.9);
+            rect.setFillStyle(darkenColor(symbolRgb, 0.7), 0.95);
+          }
+          if (highlight?.active) {
+            highlight.setFillStyle(lightenColor(symbolRgb, 0.2), 0.35);
+          }
+          if (label?.active) {
+            label.setColor("#f8fafc");
+            label.setShadow(0, 0, "#000000", 0, false, false);
+            label.setScale(1);
+          }
+          if (container.active) {
+            container.setScale(1);
+          }
+          if (badge.active) {
+            this.tweens.add({
+              targets: badge,
+              alpha: 0,
+              scale: 0.92,
+              duration: 140,
+              ease: "Cubic.easeInOut",
+              onComplete: () => badge.destroy(),
+            });
+          }
+        });
+      });
+
+      const totalDuration = 1280 + Math.max(0, highlightTargets.length - 1) * 120;
+      this.time.delayedCall(totalDuration, onComplete);
     }
 
     private playExplosion(row: number, col: number, symbol: string) {
@@ -263,6 +462,88 @@ function createBoardScene(
       });
     }
 
+    private playMatchContour(cells: Array<{ row: number; col: number }>, symbol: string): number {
+      if (cells.length === 0) {
+        return 0;
+      }
+
+      const { cellSize, gap } = this.metrics;
+      const pad = gap / 2;
+      const cellSet = new Set(cells.map((cell) => `${cell.row}-${cell.col}`));
+      const segments: Array<{ x1: number; y1: number; x2: number; y2: number }> = [];
+
+      cells.forEach((cell) => {
+        const { x, y } = this.getCellPosition(cell.row, cell.col);
+        const left = x - pad;
+        const right = x + cellSize + pad;
+        const top = y - pad;
+        const bottom = y + cellSize + pad;
+
+        if (!cellSet.has(`${cell.row - 1}-${cell.col}`)) {
+          segments.push({ x1: left, y1: top, x2: right, y2: top });
+        }
+        if (!cellSet.has(`${cell.row + 1}-${cell.col}`)) {
+          segments.push({ x1: left, y1: bottom, x2: right, y2: bottom });
+        }
+        if (!cellSet.has(`${cell.row}-${cell.col - 1}`)) {
+          segments.push({ x1: left, y1: top, x2: left, y2: bottom });
+        }
+        if (!cellSet.has(`${cell.row}-${cell.col + 1}`)) {
+          segments.push({ x1: right, y1: top, x2: right, y2: bottom });
+        }
+      });
+
+      if (segments.length === 0) {
+        return 0;
+      }
+
+      const symbolRgb = hexToRgb(getSymbolColor(symbol || "A"));
+      const glowColor = lightenColor(symbolRgb, 0.72);
+      const coreColor = lightenColor(symbolRgb, 0.9);
+
+      const glow = this.add.graphics();
+      glow.setDepth(1110);
+      glow.setBlendMode(Phaser.BlendModes.ADD);
+      glow.lineStyle(Math.max(5, cellSize * 0.16), glowColor, 0.32);
+      segments.forEach((segment) => {
+        glow.lineBetween(segment.x1, segment.y1, segment.x2, segment.y2);
+      });
+      glow.setAlpha(0);
+
+      const stroke = this.add.graphics();
+      stroke.setDepth(1111);
+      stroke.lineStyle(Math.max(2, cellSize * 0.06), coreColor, 0.95);
+      segments.forEach((segment) => {
+        stroke.lineBetween(segment.x1, segment.y1, segment.x2, segment.y2);
+      });
+      stroke.setAlpha(0);
+
+      this.tweens.add({
+        targets: [glow, stroke],
+        alpha: 1,
+        duration: 120,
+        yoyo: true,
+        repeat: 2,
+        ease: "Sine.easeInOut",
+      });
+
+      this.tweens.add({
+        targets: [glow, stroke],
+        scale: 1.02,
+        duration: 140,
+        yoyo: true,
+        repeat: 2,
+        ease: "Sine.easeInOut",
+      });
+
+      this.time.delayedCall(MATCH_CONTOUR_DURATION, () => {
+        glow.destroy();
+        stroke.destroy();
+      });
+
+      return MATCH_CONTOUR_DURATION;
+    }
+
     renderPlay(play: PlayOutcome) {
       this.time.removeAllEvents();
       this.tweens.killAll();
@@ -308,12 +589,6 @@ function createBoardScene(
       const stepWin = step.winStep ?? 0;
       const removalDuration = 520;
 
-      if (step.bonus && this.currentPlay?.playId) {
-        gameBus.emit("game:bonus:triggered", {
-          playId: this.currentPlay.playId,
-          bonusData: step.bonusData,
-        });
-      }
       if (this.currentPlay?.playId) {
         gameBus.emit("game:cascade:step", {
           playId: this.currentPlay.playId,
@@ -322,81 +597,175 @@ function createBoardScene(
         });
       }
 
-      step.removeCells.forEach((cell) => {
-        const sprite = this.cellMap.get(`${cell.row}-${cell.col}`);
-        const symbol = this.grid?.[cell.row]?.[cell.col] ?? "";
-        this.playExplosion(cell.row, cell.col, symbol);
-        if (sprite) {
-          this.tweens.add({
-            targets: sprite,
-            scale: 0.6,
-            alpha: 0,
-            duration: removalDuration,
-            ease: "Cubic.easeIn",
-          });
-        }
-      });
-
-      if (this.currentPlay?.playId && stepWin > 0) {
-        this.accumulatedWin += stepWin;
-        gameBus.emit("game:win:increment", { playId: this.currentPlay.playId, amount: stepWin });
-        this.header?.setText(
-          `Play ${this.currentPlay?.playId ?? ""} - Paso ${stepIndex + 1}/${totalSteps} - Win ${this.accumulatedWin}`,
-        );
+      if (step.bonus) {
+        const triggerCount = Math.max(1, Math.min(BONUS_HIGHLIGHT_LIMIT, step.bonusData?.triggerCount ?? BONUS_HIGHLIGHT_LIMIT));
+        this.playBonusTriggerHighlight(triggerCount, step.bonusData?.triggerCells, () => {
+          if (this.currentPlay?.playId) {
+            gameBus.emit("game:bonus:triggered", {
+              playId: this.currentPlay.playId,
+              bonusData: step.bonusData,
+            });
+          }
+          onComplete();
+        });
+        return;
       }
 
-      const applyDelay = removalDuration + 160;
+      const firstRemovedCell = step.removeCells[0];
+      const matchSymbol = firstRemovedCell ? this.grid?.[firstRemovedCell.row]?.[firstRemovedCell.col] ?? "" : "";
+      const contourDelay = this.playMatchContour(step.removeCells, matchSymbol);
 
-      this.time.delayedCall(applyDelay, () => {
-        if (!this.grid) {
-          onComplete();
-          return;
+      const startRemoval = () => {
+        step.removeCells.forEach((cell) => {
+          const sprite = this.cellMap.get(`${cell.row}-${cell.col}`);
+          const symbol = this.grid?.[cell.row]?.[cell.col] ?? "";
+          this.playExplosion(cell.row, cell.col, symbol);
+          if (sprite) {
+            this.tweens.add({
+              targets: sprite,
+              scale: 0.6,
+              alpha: 0,
+              duration: removalDuration,
+              ease: "Cubic.easeIn",
+            });
+          }
+        });
+
+        if (this.currentPlay?.playId && stepWin > 0) {
+          this.accumulatedWin += stepWin;
+          gameBus.emit("game:win:increment", { playId: this.currentPlay.playId, amount: stepWin });
+          this.header?.setText(
+            `Play ${this.currentPlay?.playId ?? ""} - Paso ${stepIndex + 1}/${totalSteps} - Win ${this.accumulatedWin}`,
+          );
         }
-        const rows = this.boardSize.rows;
-        const cols = this.boardSize.cols;
-        const nextGrid = step.gridAfter ?? this.grid;
-        this.grid = normalizeGrid(nextGrid, rows, cols);
-        this.getBoardOffsets();
 
-        if (this.currentPlay?.mode === "nivel1") {
-          const newMap = new Map<string, Phaser.GameObjects.Container>();
-          const appearDuration = 280;
+        const applyDelay = removalDuration + 160;
 
-          for (let row = 0; row < rows; row += 1) {
-            for (let col = 0; col < cols; col += 1) {
-              const key = `${row}-${col}`;
-              const existing = this.cellMap.get(key);
-              const { x, y } = this.getCellPosition(row, col);
+        this.time.delayedCall(applyDelay, () => {
+          if (!this.grid) {
+            onComplete();
+            return;
+          }
+          const rows = this.boardSize.rows;
+          const cols = this.boardSize.cols;
+          const nextGrid = step.gridAfter ?? this.grid;
+          this.grid = normalizeGrid(nextGrid, rows, cols);
+          this.getBoardOffsets();
 
-              if (!removeSet.has(key) && existing) {
-                existing.setPosition(x, y);
-                existing.setScale(1);
-                existing.setAlpha(1);
-                existing.setData("row", row);
-                existing.setData("col", col);
-                newMap.set(key, existing);
-                continue;
+          if (this.currentPlay?.mode === "nivel1") {
+            const newMap = new Map<string, Phaser.GameObjects.Container>();
+            const appearDuration = 280;
+
+            for (let row = 0; row < rows; row += 1) {
+              for (let col = 0; col < cols; col += 1) {
+                const key = `${row}-${col}`;
+                const existing = this.cellMap.get(key);
+                const { x, y } = this.getCellPosition(row, col);
+
+                if (!removeSet.has(key) && existing) {
+                  existing.setPosition(x, y);
+                  existing.setScale(1);
+                  existing.setAlpha(1);
+                  existing.setData("row", row);
+                  existing.setData("col", col);
+                  newMap.set(key, existing);
+                  continue;
+                }
+
+                const container = this.createCellContainer(this.grid[row][col], x, y);
+                container.setAlpha(0);
+                container.setScale(0.85);
+                container.setData("row", row);
+                container.setData("col", col);
+                newMap.set(key, container);
+
+                this.tweens.add({
+                  targets: container,
+                  alpha: 1,
+                  scale: 1,
+                  duration: appearDuration,
+                  ease: "Cubic.easeOut",
+                });
               }
+            }
 
-              const container = this.createCellContainer(this.grid[row][col], x, y);
-              container.setAlpha(0);
-              container.setScale(0.85);
-              container.setData("row", row);
+            this.cellMap.forEach((container, key) => {
+              if (newMap.get(key) !== container) {
+                container.destroy();
+              }
+            });
+            this.cellMap.clear();
+            newMap.forEach((value, key) => this.cellMap.set(key, value));
+
+            if (stepWin === 0) {
+              this.header?.setText(
+                `Play ${this.currentPlay?.playId ?? ""} - Paso ${stepIndex + 1}/${totalSteps} - Win ${this.accumulatedWin}`,
+              );
+            }
+            this.time.delayedCall(appearDuration + 120, onComplete);
+            return;
+          }
+
+          const dropDistance = this.metrics.cellSize * (rows + 1);
+          const newMap = new Map<string, Phaser.GameObjects.Container>();
+          const dropDuration = 480;
+
+          for (let col = 0; col < cols; col += 1) {
+            const survivors: Phaser.GameObjects.Container[] = [];
+            for (let row = rows - 1; row >= 0; row -= 1) {
+              const key = `${row}-${col}`;
+              if (removeSet.has(key)) continue;
+              const container = this.cellMap.get(key);
+              if (container) {
+                survivors.push(container);
+              }
+            }
+
+            let writeRow = rows - 1;
+            survivors.forEach((container) => {
+              const targetRow = writeRow;
+              writeRow -= 1;
+              const { x, y } = this.getCellPosition(targetRow, col);
+              const prevRow = container.getData("row");
+              const prevCol = container.getData("col");
+              container.setData("row", targetRow);
               container.setData("col", col);
-              newMap.set(key, container);
+              newMap.set(`${targetRow}-${col}`, container);
+              if (prevRow !== targetRow || prevCol !== col) {
+                this.tweens.add({
+                  targets: container,
+                  x,
+                  y,
+                  duration: dropDuration,
+                  ease: "Cubic.easeOut",
+                });
+              }
+            });
 
+            const dropSymbols = step.dropIn.find((d) => d.col === col)?.symbols ?? [];
+            for (let i = dropSymbols.length - 1; i >= 0; i -= 1) {
+              const symbol = dropSymbols[i];
+              const targetRow = writeRow;
+              writeRow -= 1;
+              const { x, y } = this.getCellPosition(targetRow, col);
+              const startY = y - dropDistance;
+              const container = this.createCellContainer(symbol, x, startY);
+              container.setAlpha(0);
+              container.setData("row", targetRow);
+              container.setData("col", col);
+              newMap.set(`${targetRow}-${col}`, container);
               this.tweens.add({
                 targets: container,
+                y,
                 alpha: 1,
-                scale: 1,
-                duration: appearDuration,
+                duration: dropDuration,
                 ease: "Cubic.easeOut",
               });
             }
           }
 
           this.cellMap.forEach((container, key) => {
-            if (newMap.get(key) !== container) {
+            if (removeSet.has(key)) {
               container.destroy();
             }
           });
@@ -408,83 +777,15 @@ function createBoardScene(
               `Play ${this.currentPlay?.playId ?? ""} - Paso ${stepIndex + 1}/${totalSteps} - Win ${this.accumulatedWin}`,
             );
           }
-          this.time.delayedCall(appearDuration + 120, onComplete);
-          return;
-        }
-
-        const dropDistance = this.metrics.cellSize * (rows + 1);
-        const newMap = new Map<string, Phaser.GameObjects.Container>();
-        const dropDuration = 480;
-
-        for (let col = 0; col < cols; col += 1) {
-          const survivors: Phaser.GameObjects.Container[] = [];
-          for (let row = rows - 1; row >= 0; row -= 1) {
-            const key = `${row}-${col}`;
-            if (removeSet.has(key)) continue;
-            const container = this.cellMap.get(key);
-            if (container) {
-              survivors.push(container);
-            }
-          }
-
-          let writeRow = rows - 1;
-          survivors.forEach((container) => {
-            const targetRow = writeRow;
-            writeRow -= 1;
-            const { x, y } = this.getCellPosition(targetRow, col);
-            const prevRow = container.getData("row");
-            const prevCol = container.getData("col");
-            container.setData("row", targetRow);
-            container.setData("col", col);
-            newMap.set(`${targetRow}-${col}`, container);
-            if (prevRow !== targetRow || prevCol !== col) {
-              this.tweens.add({
-                targets: container,
-                x,
-                y,
-                duration: dropDuration,
-                ease: "Cubic.easeOut",
-              });
-            }
-          });
-
-          const dropSymbols = step.dropIn.find((d) => d.col === col)?.symbols ?? [];
-          for (let i = dropSymbols.length - 1; i >= 0; i -= 1) {
-            const symbol = dropSymbols[i];
-            const targetRow = writeRow;
-            writeRow -= 1;
-            const { x, y } = this.getCellPosition(targetRow, col);
-            const startY = y - dropDistance;
-            const container = this.createCellContainer(symbol, x, startY);
-            container.setAlpha(0);
-            container.setData("row", targetRow);
-            container.setData("col", col);
-            newMap.set(`${targetRow}-${col}`, container);
-            this.tweens.add({
-              targets: container,
-              y,
-              alpha: 1,
-              duration: dropDuration,
-              ease: "Cubic.easeOut",
-            });
-          }
-        }
-
-        this.cellMap.forEach((container, key) => {
-          if (removeSet.has(key)) {
-            container.destroy();
-          }
+          this.time.delayedCall(dropDuration + 120, onComplete);
         });
-        this.cellMap.clear();
-        newMap.forEach((value, key) => this.cellMap.set(key, value));
+      };
 
-        if (stepWin === 0) {
-          this.header?.setText(
-            `Play ${this.currentPlay?.playId ?? ""} - Paso ${stepIndex + 1}/${totalSteps} - Win ${this.accumulatedWin}`,
-          );
-        }
-        this.time.delayedCall(dropDuration + 120, onComplete);
-      });
+      if (contourDelay > 0) {
+        this.time.delayedCall(contourDelay, startRemoval);
+      } else {
+        startRemoval();
+      }
     }
 
     private drawGrid(grid: string[][]) {

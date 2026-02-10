@@ -99,6 +99,7 @@ export interface CascadeStep {
   bonusData?: {
     mode: Exclude<GameMode, "pack">;
     triggerCount: number;
+    triggerCells?: CellRef[];
     prizeMultipliers: number[];
     endCode: string;
     maxRounds: number;
