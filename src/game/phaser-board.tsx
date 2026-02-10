@@ -196,6 +196,56 @@ function createBoardScene(
       return this.add.container(x, y, [rect, highlight, label]);
     }
 
+    private playExplosion(row: number, col: number, symbol: string) {
+      const { cellSize } = this.metrics;
+      const { x, y } = this.getCellPosition(row, col);
+      const centerX = x + cellSize / 2;
+      const centerY = y + cellSize / 2;
+      const symbolColor = getSymbolColor(symbol || "A");
+      const symbolRgb = hexToRgb(symbolColor);
+      const flashColor = lightenColor(symbolRgb, 0.55);
+      const sparkColor = lightenColor(symbolRgb, 0.35);
+
+      const flash = this.add.circle(centerX, centerY, Math.max(8, cellSize * 0.12), flashColor, 0.85);
+      flash.setBlendMode(Phaser.BlendModes.ADD);
+      this.tweens.add({
+        targets: flash,
+        scale: 3.2,
+        alpha: 0,
+        duration: 220,
+        ease: "Cubic.easeOut",
+        onComplete: () => flash.destroy(),
+      });
+
+      const sparks = Array.from({ length: 10 }).map((_, idx) => {
+        const angle = (Math.PI * 2 * idx) / 10;
+        const spark = this.add.circle(centerX, centerY, Math.max(2, cellSize * 0.04), sparkColor, 0.95);
+        spark.setBlendMode(Phaser.BlendModes.ADD);
+        const distance = cellSize * (0.26 + Math.random() * 0.24);
+        const targetX = centerX + Math.cos(angle) * distance;
+        const targetY = centerY + Math.sin(angle) * distance;
+        this.tweens.add({
+          targets: spark,
+          x: targetX,
+          y: targetY,
+          alpha: 0,
+          scale: 0.2,
+          duration: 260 + Math.floor(Math.random() * 80),
+          ease: "Cubic.easeOut",
+          onComplete: () => spark.destroy(),
+        });
+        return spark;
+      });
+
+      this.time.delayedCall(420, () => {
+        sparks.forEach((spark) => {
+          if (spark.active) {
+            spark.destroy();
+          }
+        });
+      });
+    }
+
     renderPlay(play: PlayOutcome) {
       this.time.removeAllEvents();
       this.tweens.killAll();
@@ -246,6 +296,8 @@ function createBoardScene(
 
       step.removeCells.forEach((cell) => {
         const sprite = this.cellMap.get(`${cell.row}-${cell.col}`);
+        const symbol = this.grid?.[cell.row]?.[cell.col] ?? "";
+        this.playExplosion(cell.row, cell.col, symbol);
         if (sprite) {
           this.tweens.add({
             targets: sprite,
