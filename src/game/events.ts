@@ -14,6 +14,8 @@ export type GameEvents = {
   "game:state-change": { state: GameState };
   "game:play:started": { mode: GameMode; bet: number };
   "game:play:completed": PlayOutcome;
+  "game:cascade:step": { playId: string; stepIndex: number; totalSteps: number };
+  "game:cascade:completed": { playId: string; totalSteps: number };
   "game:bonus:triggered": {
     playId: string;
     bonusData?: PlayOutcome["cascades"][number]["bonusData"];

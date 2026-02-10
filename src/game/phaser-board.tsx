@@ -279,7 +279,11 @@ function createBoardScene(
 
       const initialDelay = 800;
       const runStep = (idx: number) => {
-        if (!this.grid || idx >= play.cascades.length) {
+        if (!this.grid) {
+          return;
+        }
+        if (idx >= play.cascades.length) {
+          gameBus.emit("game:cascade:completed", { playId: play.playId, totalSteps: play.cascades.length });
           return;
         }
         this.animateStep(play.cascades[idx], idx, play.cascades.length, () => {
@@ -308,6 +312,13 @@ function createBoardScene(
         gameBus.emit("game:bonus:triggered", {
           playId: this.currentPlay.playId,
           bonusData: step.bonusData,
+        });
+      }
+      if (this.currentPlay?.playId) {
+        gameBus.emit("game:cascade:step", {
+          playId: this.currentPlay.playId,
+          stepIndex: stepIndex + 1,
+          totalSteps,
         });
       }
 

@@ -127,6 +127,7 @@ export default function Home() {
   const machineRef = useRef(createStateMachine("LOADING"));
   const splashDelayRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const endTicketDelayRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const bonusIntroDelayRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const [config, setConfig] = useState<GameConfig | null>(null);
   const [mode, setMode] = useState<GameMode>("nivel1");
@@ -146,6 +147,7 @@ export default function Home() {
   const [rulesIndex, setRulesIndex] = useState(0);
   const [infoOpen, setInfoOpen] = useState(false);
   const [bonusSession, setBonusSession] = useState<BonusSession | null>(null);
+  const [bonusIntroActive, setBonusIntroActive] = useState(false);
 
   const transition = useCallback((next: GameState) => {
     machineRef.current.transition(next);
@@ -197,6 +199,13 @@ export default function Home() {
     [clearEndTicketDelay, transition],
   );
 
+  const clearBonusIntroDelay = useCallback(() => {
+    if (bonusIntroDelayRef.current) {
+      clearTimeout(bonusIntroDelayRef.current);
+      bonusIntroDelayRef.current = null;
+    }
+  }, []);
+
   const refreshConfig = useCallback(async () => {
     clearSplashDelay();
     setError(null);
@@ -233,23 +242,44 @@ export default function Home() {
       stopTelemetry();
       clearSplashDelay();
       clearEndTicketDelay();
+      clearBonusIntroDelay();
     };
-  }, [clearEndTicketDelay, clearSplashDelay, refreshConfig]);
+  }, [clearBonusIntroDelay, clearEndTicketDelay, clearSplashDelay, refreshConfig]);
 
   useEffect(() => {
     setPackOutcome(undefined);
     setPackRevealed(0);
     setBonusSession(null);
+    setBonusIntroActive(false);
     clearEndTicketDelay();
-  }, [bet, clearEndTicketDelay, mode, packSize, packLevel]);
+    clearBonusIntroDelay();
+  }, [bet, clearBonusIntroDelay, clearEndTicketDelay, mode, packSize, packLevel]);
 
   useEffect(() => {
     if (play) {
       setDisplayedWin(0);
       setBonusSession(null);
+      setBonusIntroActive(false);
       clearEndTicketDelay();
+      clearBonusIntroDelay();
     }
-  }, [clearEndTicketDelay, play?.playId]);
+  }, [clearBonusIntroDelay, clearEndTicketDelay, play?.playId]);
+
+  useEffect(() => {
+    clearBonusIntroDelay();
+    if (!bonusSession || bonusSession.revealedCell || bonusSession.mode !== "nivel2") {
+      setBonusIntroActive(false);
+      return;
+    }
+    setBonusIntroActive(true);
+    bonusIntroDelayRef.current = setTimeout(() => {
+      setBonusIntroActive(false);
+      bonusIntroDelayRef.current = null;
+    }, 1300);
+    return () => {
+      clearBonusIntroDelay();
+    };
+  }, [bonusSession?.playId, bonusSession?.revealedCell, bonusSession?.round, clearBonusIntroDelay]);
 
   useEffect(() => {
     if (packOutcome) {
@@ -276,6 +306,26 @@ export default function Home() {
       unsubscribe();
     };
   }, [mode, play?.playId]);
+
+  useEffect(() => {
+    if (!play || mode === "pack") {
+      return;
+    }
+    const hasBonusInPlay = play.cascades.some((step) => step.bonus);
+    const onStep = gameBus.on("game:cascade:step", ({ playId }) => {
+      if (playId !== play.playId) return;
+      transition("CASCADE_LOOP");
+    });
+    const onCompleted = gameBus.on("game:cascade:completed", ({ playId }) => {
+      if (playId !== play.playId) return;
+      if (hasBonusInPlay) return;
+      scheduleEndTicket(250);
+    });
+    return () => {
+      onStep();
+      onCompleted();
+    };
+  }, [mode, play?.playId, scheduleEndTicket, transition]);
 
   useEffect(() => {
     if (!play || mode === "pack") {
@@ -335,11 +385,6 @@ export default function Home() {
       setBonusSession(null);
       transition("REVEAL");
       gameBus.emit("game:play:completed", outcome);
-      const cascadeDuration = 1200 + outcome.cascades.length * 1000;
-      const hasBonus = outcome.cascades.some((step) => step.bonus);
-      if (!hasBonus) {
-        scheduleEndTicket(cascadeDuration);
-      }
     } catch (err) {
       setError("No pudimos obtener el ticket.");
       transition("MENU");
@@ -419,6 +464,7 @@ export default function Home() {
     ? formatMoney(bonusSession?.totalWin ?? 0, moneyFormat)
     : `$${(bonusSession?.totalWin ?? 0).toLocaleString("es-CL")}`;
   const bonusActive = Boolean(bonusSession);
+  const showBonusLetters = bonusSession?.mode === "nivel2";
 
   const packLevelLabel = packLevel === "nivel1" ? "Nivel 1" : "Nivel 2";
   const modeBadge =
@@ -477,6 +523,7 @@ export default function Home() {
 
   const onBonusPick = (cellIndex: number) => {
     if (!bonusSession) return;
+    if (bonusIntroActive) return;
     if (bonusSession.revealedCell) return;
     const selected = bonusSession.cells[cellIndex];
     if (!selected) return;
@@ -1073,23 +1120,27 @@ export default function Home() {
               <p className={styles.bonusTitle}>BONUS</p>
               <span className={styles.chip}>Ronda {bonusSession.round}</span>
             </div>
-            <p className={styles.bonusHint}>Selecciona una celda</p>
+            <p className={styles.bonusHint}>{bonusIntroActive ? "Bonus activado..." : "Selecciona una celda"}</p>
             <div className={styles.bonusGrid}>
               {bonusSession.cells.map((cell, idx) => (
                 <button
                   key={cell.id}
-                  className={`${styles.bonusCell} ${bonusSession.revealedIndex === idx ? styles.bonusCellRevealed : ""}`}
+                  className={`${styles.bonusCell} ${bonusIntroActive ? styles.bonusCellIntro : ""} ${bonusSession.revealedIndex === idx ? styles.bonusCellRevealed : ""}`}
                   onClick={() => onBonusPick(idx)}
                   type="button"
-                  disabled={Boolean(bonusSession.revealedCell)}
+                  disabled={Boolean(bonusSession.revealedCell) || bonusIntroActive}
+                  style={bonusIntroActive ? { animationDelay: `${idx * 140}ms` } : undefined}
                 >
                   <span className={styles.bonusCellTop}>Objetivo {idx + 1}</span>
+                  {showBonusLetters ? <span className={styles.bonusCellLetter}>{String.fromCharCode(65 + idx)}</span> : null}
                   <span className={styles.bonusCellBottom}>
                     {bonusSession.revealedIndex === idx
                       ? cell.type === "prize"
                         ? `Ganaste ${moneyFormat ? formatMoney(cell.amount, moneyFormat) : `$${cell.amount.toLocaleString("es-CL")}`}`
                         : bonusSession.endCode
-                      : "Tap / Click"}
+                      : bonusIntroActive
+                        ? "..."
+                        : "Tap / Click"}
                   </span>
                 </button>
               ))}
