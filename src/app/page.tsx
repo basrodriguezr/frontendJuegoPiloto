@@ -430,6 +430,27 @@ export default function Home() {
   }
 
   const boardPlay: PlayOutcome | undefined = mode === "pack" ? undefined : play;
+  type BoardVisualConfig = {
+    previewSize?: { rows: number; cols: number };
+    engineType?: "cluster" | "reels";
+  };
+  const getBoardVisualConfig = (targetMode: GameMode | undefined): BoardVisualConfig => {
+    if (targetMode === "pack") {
+      return { previewSize: undefined, engineType: undefined };
+    }
+    const level = targetMode === "nivel2" ? "nivel2" : "nivel1";
+    const levelConfig = config?.engine?.levels?.[level];
+    const previewSize = levelConfig
+      ? {
+        rows: Math.max(1, Math.round(levelConfig.rows)),
+        cols: Math.max(1, Math.round(levelConfig.cols)),
+      }
+      : undefined;
+    const engineType: BoardVisualConfig["engineType"] = levelConfig?.engineType === "reels" ? "reels" : "cluster";
+    return { previewSize, engineType };
+  };
+  const boardVisualConfig = getBoardVisualConfig(mode);
+  const replayVisualConfig = getBoardVisualConfig(replayModal?.mode);
 
   const packTotal = packOutcome?.plays.length ?? packSize;
   const revealedPlays = packOutcome ? packOutcome.plays.slice(0, packRevealed) : [];
@@ -1106,7 +1127,13 @@ export default function Home() {
                 </>
               ) : (
                 <div className={styles.boardShell}>
-                  <PhaserBoard play={boardPlay} mode={mode} symbolPaytable={config?.symbolPaytable} />
+                  <PhaserBoard
+                    play={boardPlay}
+                    mode={mode}
+                    symbolPaytable={config?.symbolPaytable}
+                    previewSize={boardVisualConfig.previewSize}
+                    engineType={boardVisualConfig.engineType}
+                  />
                 </div>
               )}
             </article>
@@ -1182,7 +1209,13 @@ export default function Home() {
               </button>
             </div>
             <div className={styles.modalBody}>
-              <PhaserBoard play={replayModal} mode={replayModal.mode} symbolPaytable={config?.symbolPaytable} />
+              <PhaserBoard
+                play={replayModal}
+                mode={replayModal.mode}
+                symbolPaytable={config?.symbolPaytable}
+                previewSize={replayVisualConfig.previewSize}
+                engineType={replayVisualConfig.engineType}
+              />
             </div>
           </div>
         </div>

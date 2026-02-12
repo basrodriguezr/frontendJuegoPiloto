@@ -5,10 +5,15 @@ import type * as PhaserTypes from "phaser";
 import type { GameMode, PlayOutcome, SymbolPaytableEntry } from "@/api/types";
 import { gameBus } from "@/game/events";
 
+type EngineType = "cluster" | "reels";
+type GridSize = { rows: number; cols: number };
+
 type Props = {
   play?: PlayOutcome;
   mode?: GameMode;
   symbolPaytable?: SymbolPaytableEntry[];
+  previewSize?: GridSize;
+  engineType?: EngineType;
 };
 
 type PhaserModule = typeof import("phaser");
@@ -40,9 +45,15 @@ const MATCH_CONTOUR_DURATION = 340;
 const LEVEL_ONE_PREVIEW_SIZE = { rows: 3, cols: 5 };
 const LEVEL_TWO_PREVIEW_SIZE = { rows: 7, cols: 5 };
 
-function pickBoardSize(play: PlayOutcome | undefined, mode?: GameMode): { rows: number; cols: number } {
+function pickBoardSize(play: PlayOutcome | undefined, mode?: GameMode, previewSize?: GridSize): GridSize {
   if (play?.grid0?.length && play.grid0[0]?.length) {
     return { rows: play.grid0.length, cols: play.grid0[0].length };
+  }
+  if (previewSize?.rows && previewSize?.cols) {
+    return {
+      rows: Math.max(1, Math.round(previewSize.rows)),
+      cols: Math.max(1, Math.round(previewSize.cols)),
+    };
   }
   if (mode === "nivel1") {
     return LEVEL_ONE_PREVIEW_SIZE;
@@ -92,8 +103,9 @@ function computeMetrics(
   containerWidth: number,
   containerHeight?: number,
   mode?: GameMode,
+  previewSize?: GridSize,
 ): BoardMetrics {
-  const size = pickBoardSize(play, mode);
+  const size = pickBoardSize(play, mode, previewSize);
   const rows = Math.max(1, size.rows);
   const cols = Math.max(1, size.cols);
 
@@ -121,12 +133,14 @@ function createBoardScene(
   getMetrics: () => BoardMetrics,
   getInitialPlay: () => PlayOutcome | undefined,
   getPreviewMode: () => GameMode | undefined,
+  getPreviewSize: () => GridSize | undefined,
+  getEngineType: () => EngineType | undefined,
   getSymbolColor: (symbol: string) => string,
 ) {
   return class BoardScene extends Phaser.Scene {
     private cellMap = new Map<string, Phaser.GameObjects.Container>();
     private grid?: string[][];
-    private boardSize = pickBoardSize(undefined, getPreviewMode());
+    private boardSize = pickBoardSize(undefined, getPreviewMode(), getPreviewSize());
     private header?: Phaser.GameObjects.Text;
     private metrics: BoardMetrics = getMetrics();
     private currentPlay?: PlayOutcome;
@@ -173,7 +187,7 @@ function createBoardScene(
       this.currentPlay = undefined;
       this.accumulatedWin = 0;
       const previewMode = getPreviewMode();
-      const size = pickBoardSize(undefined, previewMode);
+      const size = pickBoardSize(undefined, previewMode, getPreviewSize());
       this.boardSize = { rows: Math.max(1, size.rows), cols: Math.max(1, size.cols) };
       const emptyGrid = normalizeGrid([], this.boardSize.rows, this.boardSize.cols);
       this.grid = emptyGrid;
@@ -182,18 +196,50 @@ function createBoardScene(
     }
 
     private playBoardIntro(): number {
-      const ordered = Array.from(this.cellMap.entries())
-        .sort((a, b) => {
-          const [rowA, colA] = a[0].split("-").map((value) => Number(value));
-          const [rowB, colB] = b[0].split("-").map((value) => Number(value));
-          if (rowA !== rowB) return rowA - rowB;
-          return colA - colB;
+      const entries = Array.from(this.cellMap.entries())
+        .map(([key, container]) => {
+          const [row, col] = key.split("-").map((value) => Number(value));
+          return { row, col, container };
         })
-        .map((entry) => entry[1]);
+        .filter((entry) => Number.isFinite(entry.row) && Number.isFinite(entry.col));
 
-      if (ordered.length === 0) {
+      if (entries.length === 0) {
         return 0;
       }
+
+      if (getEngineType() === "reels") {
+        const colDelay = 130;
+        const rowDelay = 26;
+        const duration = 360;
+        const lift = Math.max(100, this.metrics.cellSize * 2.1);
+
+        entries.forEach(({ row, col, container }) => {
+          const delay = col * colDelay + row * rowDelay;
+          const targetY = container.y;
+          container.setAlpha(0);
+          container.setScale(1);
+          container.setY(targetY - lift);
+          this.tweens.add({
+            targets: container,
+            y: targetY,
+            alpha: 1,
+            duration,
+            delay,
+            ease: "Cubic.easeOut",
+          });
+        });
+
+        const maxCol = Math.max(...entries.map((entry) => entry.col));
+        const maxRow = Math.max(...entries.map((entry) => entry.row));
+        return duration + maxCol * colDelay + maxRow * rowDelay;
+      }
+
+      const ordered = entries
+        .sort((a, b) => {
+          if (a.row !== b.row) return a.row - b.row;
+          return a.col - b.col;
+        })
+        .map((entry) => entry.container);
 
       const stepDelay = 40;
       const duration = 260;
@@ -239,12 +285,13 @@ function createBoardScene(
 
     private createCellContainer(symbol: string, x: number, y: number) {
       const { cellSize } = this.metrics;
-      const symbolColor = getSymbolColor(symbol);
+      const symbolColor = symbol ? getSymbolColor(symbol) : "#64748b";
       const symbolRgb = hexToRgb(symbolColor);
       const metallic = Boolean(this.currentPlay);
-      const baseFill = metallic ? 0x374151 : darkenColor(symbolRgb, 0.7);
-      const glowFill = metallic ? 0xcbd5e1 : darkenColor(symbolRgb, 0.55);
-      const highlightFill = metallic ? 0xf1f5f9 : lightenColor(symbolRgb, 0.2);
+      const baseFill = metallic ? darkenColor(symbolRgb, 0.64) : darkenColor(symbolRgb, 0.74);
+      const glowFill = metallic ? lightenColor(symbolRgb, 0.24) : darkenColor(symbolRgb, 0.55);
+      const highlightFill = metallic ? lightenColor(symbolRgb, 0.36) : lightenColor(symbolRgb, 0.2);
+      const shadeFill = metallic ? darkenColor(symbolRgb, 0.82) : darkenColor(symbolRgb, 0.76);
 
       const rect = this.add.rectangle(0, 0, cellSize, cellSize, baseFill, 0.95);
       rect.setStrokeStyle(2, glowFill, 0.9);
@@ -265,8 +312,8 @@ function createBoardScene(
         cellSize * 0.54,
         cellSize - 4,
         Math.max(10, cellSize * 0.44),
-        metallic ? 0x111827 : darkenColor(symbolRgb, 0.76),
-        metallic ? 0.28 : 0.12
+        shadeFill,
+        metallic ? 0.24 : 0.12
       );
       shade.setOrigin(0, 0);
 
@@ -638,7 +685,7 @@ function createBoardScene(
       this.tweens.killAll();
       this.currentPlay = play;
       this.accumulatedWin = 0;
-      const size = pickBoardSize(play);
+      const size = pickBoardSize(play, getPreviewMode(), getPreviewSize());
       this.boardSize = {
         rows: Math.max(1, size.rows),
         cols: Math.max(1, size.cols),
@@ -904,7 +951,7 @@ function createBoardScene(
   };
 }
 
-export function PhaserBoard({ play, mode, symbolPaytable }: Props) {
+export function PhaserBoard({ play, mode, symbolPaytable, previewSize, engineType }: Props) {
   const containerRef = useRef<HTMLDivElement | null>(null);
   const gameRef = useRef<PhaserTypes.Game | null>(null);
   const phaserRef = useRef<PhaserModule | null>(null);
@@ -912,8 +959,10 @@ export function PhaserBoard({ play, mode, symbolPaytable }: Props) {
   const containerWidthRef = useRef<number>(DEFAULT_METRICS.width);
   const playRef = useRef<PlayOutcome | undefined>(undefined);
   const modeRef = useRef<GameMode | undefined>(mode);
+  const previewSizeRef = useRef<GridSize | undefined>(previewSize);
+  const engineTypeRef = useRef<EngineType | undefined>(engineType);
   const symbolColorRef = useRef<Map<string, string>>(new Map());
-  const currentSize = pickBoardSize(play, mode);
+  const currentSize = pickBoardSize(play, mode, previewSize);
   const aspectRatio = Math.max(0.5, currentSize.cols / Math.max(1, currentSize.rows));
 
   useEffect(() => {
@@ -923,6 +972,14 @@ export function PhaserBoard({ play, mode, symbolPaytable }: Props) {
   useEffect(() => {
     modeRef.current = mode;
   }, [mode]);
+
+  useEffect(() => {
+    previewSizeRef.current = previewSize;
+  }, [previewSize]);
+
+  useEffect(() => {
+    engineTypeRef.current = engineType;
+  }, [engineType]);
 
   useEffect(() => {
     const map = new Map<string, string>();
@@ -949,6 +1006,7 @@ export function PhaserBoard({ play, mode, symbolPaytable }: Props) {
         containerWidthRef.current,
         containerRef.current?.clientHeight || DEFAULT_METRICS.height,
         modeRef.current,
+        previewSizeRef.current,
       );
       gameRef.current.scale.resize(metricsRef.current.width, metricsRef.current.height);
       const scene = gameRef.current.scene.getScene("BoardScene");
@@ -968,12 +1026,15 @@ export function PhaserBoard({ play, mode, symbolPaytable }: Props) {
         containerWidthRef.current,
         containerRef.current?.clientHeight || DEFAULT_METRICS.height,
         modeRef.current,
+        previewSizeRef.current,
       );
       const BoardScene = createBoardScene(
         Phaser,
         () => metricsRef.current,
         () => playRef.current,
         () => modeRef.current,
+        () => previewSizeRef.current,
+        () => engineTypeRef.current,
         (symbol) => symbolColorRef.current.get(symbol) ?? "#e2e8f0",
       );
 
@@ -1005,6 +1066,7 @@ export function PhaserBoard({ play, mode, symbolPaytable }: Props) {
           containerWidthRef.current,
           containerRef.current?.clientHeight || DEFAULT_METRICS.height,
           modeRef.current,
+          previewSizeRef.current,
         );
         gameRef.current.scale.resize(metricsRef.current.width, metricsRef.current.height);
         const scene = gameRef.current.scene.getScene("BoardScene");
@@ -1035,6 +1097,7 @@ export function PhaserBoard({ play, mode, symbolPaytable }: Props) {
       containerWidthRef.current,
       containerRef.current?.clientHeight || DEFAULT_METRICS.height,
       mode,
+      previewSize,
     );
     gameRef.current.scale.resize(metricsRef.current.width, metricsRef.current.height);
     const scene = gameRef.current.scene.getScene("BoardScene");
@@ -1052,7 +1115,7 @@ export function PhaserBoard({ play, mode, symbolPaytable }: Props) {
     canvas.style.maxWidth = "100%";
     canvas.style.margin = "0 auto";
     containerRef.current.style.minHeight = `${metricsRef.current.height + 20}px`;
-  }, [mode, play]);
+  }, [engineType, mode, play, previewSize]);
 
   return <div ref={containerRef} style={{ width: "100%", aspectRatio: String(aspectRatio) }} />;
 }
