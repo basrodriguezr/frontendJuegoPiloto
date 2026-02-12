@@ -107,6 +107,14 @@ function parseSymbolCsv(input: string): string[] {
     .filter(Boolean);
 }
 
+function sanitizeCodes(codes: { clientCode: string; companyCode: string; gameCode: string }) {
+  return {
+    clientCode: codes.clientCode.trim() || "demo",
+    companyCode: codes.companyCode.trim() || "demo",
+    gameCode: codes.gameCode.trim() || "e-instant",
+  };
+}
+
 function updateLevelField(
   config: GameConfig,
   level: LevelCode,
@@ -188,16 +196,21 @@ export default function BackofficePage() {
   }
 
   async function onLoadConfig() {
-    if (!token) return;
+    if (!token) {
+      setError("Inicia sesion antes de cargar configuracion.");
+      return;
+    }
     try {
       setLoading(true);
       setError("");
       setMessage("");
-      const nextConfig = await fetchAdminGameConfig(token, codes);
+      const resolvedCodes = sanitizeCodes(codes);
+      setCodes(resolvedCodes);
+      const nextConfig = await fetchAdminGameConfig(token, resolvedCodes);
       nextConfig.engine = normalizeEngine(nextConfig);
       setConfig(nextConfig);
       loadEditorStrings(nextConfig);
-      setMessage("Configuracion cargada");
+      setMessage(`Configuracion cargada (${resolvedCodes.clientCode}/${resolvedCodes.companyCode}/${resolvedCodes.gameCode})`);
     } catch (err) {
       setError(err instanceof Error ? err.message : "No se pudo cargar configuracion");
     } finally {
@@ -206,11 +219,20 @@ export default function BackofficePage() {
   }
 
   async function onSaveConfig() {
-    if (!token || !config) return;
+    if (!token) {
+      setError("Inicia sesion antes de guardar configuracion.");
+      return;
+    }
+    if (!config) {
+      setError("Primero carga una configuracion para poder guardarla.");
+      return;
+    }
     try {
       setSaving(true);
       setError("");
       setMessage("");
+      const resolvedCodes = sanitizeCodes(codes);
+      setCodes(resolvedCodes);
 
       const payload = cloneConfig(config);
       payload.engine = normalizeEngine(payload);
@@ -224,11 +246,11 @@ export default function BackofficePage() {
           payload.engine!.levels[level].bonus.triggerSymbol.trim().toUpperCase();
       });
 
-      const saved = await saveAdminGameConfig(token, { ...codes, config: payload });
+      const saved = await saveAdminGameConfig(token, { ...resolvedCodes, config: payload });
       saved.engine = normalizeEngine(saved);
       setConfig(saved);
       loadEditorStrings(saved);
-      setMessage("Configuracion guardada correctamente");
+      setMessage(`Configuracion guardada (${resolvedCodes.clientCode}/${resolvedCodes.companyCode}/${resolvedCodes.gameCode})`);
     } catch (err) {
       setError(err instanceof Error ? err.message : "No se pudo guardar configuracion");
     } finally {
@@ -401,7 +423,7 @@ export default function BackofficePage() {
               <button className={styles.secondary} type="button" disabled={!token || loading} onClick={onLoadConfig}>
                 {loading ? "Cargando..." : "Cargar config"}
               </button>
-              <button className={styles.primary} type="button" disabled={!config || saving} onClick={onSaveConfig}>
+              <button className={styles.primary} type="button" disabled={!token || !config || saving} onClick={onSaveConfig}>
                 {saving ? "Guardando..." : "Guardar config"}
               </button>
               <Link href="/" className={styles.ghost}>
@@ -490,6 +512,18 @@ export default function BackofficePage() {
                         </select>
                       </div>
                       <div className={styles.field}>
+                        <label>Fill Mode</label>
+                        <select
+                          value={levelEngine.fillMode}
+                          onChange={(e) => setLevelFillMode(level, e.target.value as "replace" | "cascade")}
+                        >
+                          <option value="replace">replace</option>
+                          <option value="cascade">cascade</option>
+                        </select>
+                      </div>
+                    </div>
+                    <div className={styles.row}>
+                      <div className={styles.field}>
                         <label>Rows</label>
                         <input
                           type="number"
@@ -504,16 +538,6 @@ export default function BackofficePage() {
                           value={levelEngine.cols}
                           onChange={(e) => setLevelNumber(level, "cols", Number(e.target.value))}
                         />
-                      </div>
-                      <div className={styles.field}>
-                        <label>Fill Mode</label>
-                        <select
-                          value={levelEngine.fillMode}
-                          onChange={(e) => setLevelFillMode(level, e.target.value as "replace" | "cascade")}
-                        >
-                          <option value="replace">replace</option>
-                          <option value="cascade">cascade</option>
-                        </select>
                       </div>
                       <div className={styles.field}>
                         <label>Include diagonals</label>
