@@ -208,17 +208,16 @@ function createBoardScene(
       }
 
       if (getFillMode() === "rodillo") {
-        const colStartDelay = 260;
-        const rowDropDelay = 34;
-        const dropDuration = 320;
-        const stopDelay = 180;
-        const settleDuration = 340;
-        const lift = Math.max(120, this.metrics.cellSize * 2.4);
+        const colStartDelay = 320;
+        const dropDuration = 440;
+        const stopDelay = 220;
+        const settleDuration = 380;
         const rows = Math.max(1, this.boardSize.rows);
         const cols = Math.max(1, this.boardSize.cols);
         const cellPitch = this.metrics.cellSize + this.metrics.gap;
+        const lift = Math.max(cellPitch * (rows + 0.8), this.metrics.cellSize * 3);
         const wrapDistance = rows * cellPitch;
-        const spinSpeed = cellPitch * 18;
+        const spinSpeed = cellPitch * 7.2;
         const minTurnsLastColumn = 2;
         const spinDurationAfterLastDropMs = Math.round((minTurnsLastColumn * wrapDistance / spinSpeed) * 1000);
 
@@ -300,13 +299,13 @@ function createBoardScene(
           const state = columnStates[col];
           if (!state || state.cells.length === 0) return;
           let completed = 0;
-          state.cells.forEach((cell, rowIdx) => {
+          state.cells.forEach((cell) => {
             this.tweens.add({
               targets: cell.container,
               y: cell.targetY,
               alpha: 1,
               duration: dropDuration,
-              delay: rowIdx * rowDropDelay,
+              delay: 0,
               ease: "Cubic.easeOut",
               onComplete: () => {
                 completed += 1;
@@ -327,8 +326,7 @@ function createBoardScene(
 
         const dropPhase =
           (cols - 1) * colStartDelay +
-          dropDuration +
-          Math.max(0, rows - 1) * rowDropDelay;
+          dropDuration;
         const stopPhase =
           spinDurationAfterLastDropMs +
           Math.max(0, cols - 1) * stopDelay +
