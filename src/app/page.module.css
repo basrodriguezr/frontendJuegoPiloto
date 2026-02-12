@@ -375,6 +375,10 @@
   border: 1px solid transparent;
   color: var(--text);
   cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  text-decoration: none;
 }
 
 .primary {

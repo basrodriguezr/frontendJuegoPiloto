@@ -241,26 +241,44 @@ function createBoardScene(
       const { cellSize } = this.metrics;
       const symbolColor = getSymbolColor(symbol);
       const symbolRgb = hexToRgb(symbolColor);
-      const baseFill = darkenColor(symbolRgb, 0.7);
-      const glowFill = darkenColor(symbolRgb, 0.55);
-      const highlightFill = lightenColor(symbolRgb, 0.2);
+      const metallic = Boolean(this.currentPlay);
+      const baseFill = metallic ? 0x374151 : darkenColor(symbolRgb, 0.7);
+      const glowFill = metallic ? 0xcbd5e1 : darkenColor(symbolRgb, 0.55);
+      const highlightFill = metallic ? 0xf1f5f9 : lightenColor(symbolRgb, 0.2);
 
       const rect = this.add.rectangle(0, 0, cellSize, cellSize, baseFill, 0.95);
       rect.setStrokeStyle(2, glowFill, 0.9);
       rect.setOrigin(0);
 
-      const highlight = this.add.rectangle(2, 2, cellSize - 4, Math.max(12, cellSize * 0.38), highlightFill, 0.35);
+      const highlight = this.add.rectangle(
+        2,
+        2,
+        cellSize - 4,
+        Math.max(12, cellSize * 0.38),
+        highlightFill,
+        metallic ? 0.42 : 0.35
+      );
       highlight.setOrigin(0);
+
+      const shade = this.add.rectangle(
+        2,
+        cellSize * 0.54,
+        cellSize - 4,
+        Math.max(10, cellSize * 0.44),
+        metallic ? 0x111827 : darkenColor(symbolRgb, 0.76),
+        metallic ? 0.28 : 0.12
+      );
+      shade.setOrigin(0, 0);
 
       const labelFontSize = `12px`;
       const label = this.add.text(cellSize / 2, cellSize / 2, symbol, {
         fontFamily: "var(--font-geist-sans)",
         fontSize: labelFontSize,
-        color: "#f8fafc",
+        color: metallic ? "#ffffff" : "#f8fafc",
       });
       label.setOrigin(0.5);
 
-      const container = this.add.container(x, y, [rect, highlight, label]);
+      const container = this.add.container(x, y, [rect, highlight, shade, label]);
       container.setData("symbol", symbol);
       return container;
     }
@@ -321,13 +339,17 @@ function createBoardScene(
 
         const rect = container.list[0] as Phaser.GameObjects.Rectangle | undefined;
         const highlight = container.list[1] as Phaser.GameObjects.Rectangle | undefined;
-        const label = container.list[2] as Phaser.GameObjects.Text | undefined;
+        const shade = container.list[2] as Phaser.GameObjects.Rectangle | undefined;
+        const label = container.list[3] as Phaser.GameObjects.Text | undefined;
         if (rect) {
           rect.setStrokeStyle(4, glowStroke, 1);
           rect.setFillStyle(lightenColor(symbolRgb, 0.15), 0.98);
         }
         if (highlight) {
           highlight.setFillStyle(lightenColor(symbolRgb, 0.4), 0.65);
+        }
+        if (shade) {
+          shade.setFillStyle(darkenColor(symbolRgb, 0.7), 0.2);
         }
         if (label) {
           label.setColor("#fffdea");
@@ -433,6 +455,9 @@ function createBoardScene(
           }
           if (highlight?.active) {
             highlight.setFillStyle(lightenColor(symbolRgb, 0.2), 0.35);
+          }
+          if (shade?.active) {
+            shade.setFillStyle(0x111827, 0.28);
           }
           if (label?.active) {
             label.setColor("#f8fafc");

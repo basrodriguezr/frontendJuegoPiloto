@@ -60,6 +60,36 @@ export interface ClientBranding {
   fontFamily?: string;
 }
 
+export interface LevelBonusConfig {
+  triggerSymbol: string;
+  triggerCount: number;
+  prizeMultipliers: number[];
+  maxRounds: number;
+  endCode: string;
+}
+
+export interface EngineLevelConfig {
+  rows: number;
+  cols: number;
+  includeDiagonals: boolean;
+  fillMode: "replace" | "cascade";
+  maxCascades: number;
+  matchMinCluster: number;
+  excludedSymbols: string[];
+  bonus: LevelBonusConfig;
+}
+
+export interface EngineConfig {
+  rng: {
+    source: string;
+    seed: string | null;
+  };
+  levels: {
+    nivel1: EngineLevelConfig;
+    nivel2: EngineLevelConfig;
+  };
+}
+
 export interface GameConfig {
   clientCode: string;
   companyCode: string;
@@ -76,6 +106,7 @@ export interface GameConfig {
   modes: ModeConfig[];
   packSizes: PackSize[];
   board: BoardSpec;
+  engine?: EngineConfig;
   symbolPaytable?: SymbolPaytableEntry[];
   branding?: ClientBranding;
 }

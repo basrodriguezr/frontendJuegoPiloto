@@ -22,6 +22,7 @@ npm run dev
 - Inicia el servidor dev de Next en `http://localhost:3000` (o el puerto configurado).
 - Variables `NEXT_PUBLIC_CLIENT_CODE` y `NEXT_PUBLIC_COMPANY_CODE` se leen desde `.env.local` para cargar tema/parametros del cliente.
 - Alias `@/*` apunta a `./src/*` (usado por Next y Vitest).
+- Backoffice disponible en `http://localhost:3000/backoffice`.
 
 ## Build y produccion
 ```bash
@@ -140,6 +141,7 @@ El frontend usa `NEXT_PUBLIC_WS_URL` si necesitas apuntar a un backend externo.
 Crea `.env.local` (no commitear) con, por ejemplo:
 ```
 NEXT_PUBLIC_WS_URL=ws://localhost:4000/ws
+NEXT_PUBLIC_API_BASE_URL=http://localhost:4000
 NEXT_PUBLIC_CLIENT_CODE=acme
 NEXT_PUBLIC_COMPANY_CODE=acme
 NEXT_PUBLIC_GAME_CODE=e-instant

@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import Link from "next/link";
 import { loadGameConfig } from "@/api/config-loader";
 import { playPack, playTicket } from "@/api/client";
 import type { GameConfig, GameMode, PackLevel, PackOutcome, PackPlay, PackSize, PlayOutcome } from "@/api/types";
@@ -780,9 +781,14 @@ export default function Home() {
           </div>
           <div className={styles.stageActions}>
             {uiStage !== "splash" ? (
-              <button className={styles.ghost} onClick={refreshConfig} type="button">
-                Reload config
-              </button>
+              <>
+                <button className={styles.ghost} onClick={refreshConfig} type="button">
+                  Reload config
+                </button>
+                <Link className={styles.ghost} href="/backoffice">
+                  Backoffice
+                </Link>
+              </>
             ) : null}
           </div>
         </div>
