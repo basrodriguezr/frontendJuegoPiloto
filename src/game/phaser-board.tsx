@@ -5,15 +5,15 @@ import type * as PhaserTypes from "phaser";
 import type { GameMode, PlayOutcome, SymbolPaytableEntry } from "@/api/types";
 import { gameBus } from "@/game/events";
 
-type EngineType = "cluster" | "reels";
 type GridSize = { rows: number; cols: number };
+type FillMode = "replace" | "cascade" | "rodillo";
 
 type Props = {
   play?: PlayOutcome;
   mode?: GameMode;
   symbolPaytable?: SymbolPaytableEntry[];
   previewSize?: GridSize;
-  engineType?: EngineType;
+  fillMode?: FillMode;
 };
 
 type PhaserModule = typeof import("phaser");
@@ -134,7 +134,7 @@ function createBoardScene(
   getInitialPlay: () => PlayOutcome | undefined,
   getPreviewMode: () => GameMode | undefined,
   getPreviewSize: () => GridSize | undefined,
-  getEngineType: () => EngineType | undefined,
+  getFillMode: () => FillMode | undefined,
   getSymbolColor: (symbol: string) => string,
 ) {
   return class BoardScene extends Phaser.Scene {
@@ -207,7 +207,7 @@ function createBoardScene(
         return 0;
       }
 
-      if (getEngineType() === "reels") {
+      if (getFillMode() === "rodillo") {
         const colDelay = 130;
         const rowDelay = 26;
         const duration = 360;
@@ -951,7 +951,7 @@ function createBoardScene(
   };
 }
 
-export function PhaserBoard({ play, mode, symbolPaytable, previewSize, engineType }: Props) {
+export function PhaserBoard({ play, mode, symbolPaytable, previewSize, fillMode }: Props) {
   const containerRef = useRef<HTMLDivElement | null>(null);
   const gameRef = useRef<PhaserTypes.Game | null>(null);
   const phaserRef = useRef<PhaserModule | null>(null);
@@ -960,7 +960,7 @@ export function PhaserBoard({ play, mode, symbolPaytable, previewSize, engineTyp
   const playRef = useRef<PlayOutcome | undefined>(undefined);
   const modeRef = useRef<GameMode | undefined>(mode);
   const previewSizeRef = useRef<GridSize | undefined>(previewSize);
-  const engineTypeRef = useRef<EngineType | undefined>(engineType);
+  const fillModeRef = useRef<FillMode | undefined>(fillMode);
   const symbolColorRef = useRef<Map<string, string>>(new Map());
   const currentSize = pickBoardSize(play, mode, previewSize);
   const aspectRatio = Math.max(0.5, currentSize.cols / Math.max(1, currentSize.rows));
@@ -978,8 +978,8 @@ export function PhaserBoard({ play, mode, symbolPaytable, previewSize, engineTyp
   }, [previewSize?.rows, previewSize?.cols]);
 
   useEffect(() => {
-    engineTypeRef.current = engineType;
-  }, [engineType]);
+    fillModeRef.current = fillMode;
+  }, [fillMode]);
 
   useEffect(() => {
     const map = new Map<string, string>();
@@ -1034,7 +1034,7 @@ export function PhaserBoard({ play, mode, symbolPaytable, previewSize, engineTyp
         () => playRef.current,
         () => modeRef.current,
         () => previewSizeRef.current,
-        () => engineTypeRef.current,
+        () => fillModeRef.current,
         (symbol) => symbolColorRef.current.get(symbol) ?? "#e2e8f0",
       );
 
@@ -1115,7 +1115,7 @@ export function PhaserBoard({ play, mode, symbolPaytable, previewSize, engineTyp
     canvas.style.maxWidth = "100%";
     canvas.style.margin = "0 auto";
     containerRef.current.style.minHeight = `${metricsRef.current.height + 20}px`;
-  }, [engineType, mode, play, previewSize?.rows, previewSize?.cols]);
+  }, [fillMode, mode, play, previewSize?.rows, previewSize?.cols]);
 
   return <div ref={containerRef} style={{ width: "100%", aspectRatio: String(aspectRatio) }} />;
 }

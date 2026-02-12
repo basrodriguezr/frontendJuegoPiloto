@@ -432,11 +432,11 @@ export default function Home() {
   const boardPlay: PlayOutcome | undefined = mode === "pack" ? undefined : play;
   type BoardVisualConfig = {
     previewSize?: { rows: number; cols: number };
-    engineType?: "cluster" | "reels";
+    fillMode?: "replace" | "cascade" | "rodillo";
   };
   const getBoardVisualConfig = (targetMode: GameMode | undefined): BoardVisualConfig => {
     if (targetMode === "pack") {
-      return { previewSize: undefined, engineType: undefined };
+      return { previewSize: undefined, fillMode: undefined };
     }
     const level = targetMode === "nivel2" ? "nivel2" : "nivel1";
     const levelConfig = config?.engine?.levels?.[level];
@@ -446,8 +446,13 @@ export default function Home() {
         cols: Math.max(1, Math.round(levelConfig.cols)),
       }
       : undefined;
-    const engineType: BoardVisualConfig["engineType"] = levelConfig?.engineType === "reels" ? "reels" : "cluster";
-    return { previewSize, engineType };
+    const fillMode: BoardVisualConfig["fillMode"] =
+      levelConfig?.fillMode === "rodillo"
+        ? "rodillo"
+        : levelConfig?.fillMode === "replace"
+          ? "replace"
+          : "cascade";
+    return { previewSize, fillMode };
   };
   const boardVisualConfig = getBoardVisualConfig(mode);
   const replayVisualConfig = getBoardVisualConfig(replayModal?.mode);
@@ -1132,7 +1137,7 @@ export default function Home() {
                     mode={mode}
                     symbolPaytable={config?.symbolPaytable}
                     previewSize={boardVisualConfig.previewSize}
-                    engineType={boardVisualConfig.engineType}
+                    fillMode={boardVisualConfig.fillMode}
                   />
                 </div>
               )}
@@ -1214,7 +1219,7 @@ export default function Home() {
                 mode={replayModal.mode}
                 symbolPaytable={config?.symbolPaytable}
                 previewSize={replayVisualConfig.previewSize}
-                engineType={replayVisualConfig.engineType}
+                fillMode={replayVisualConfig.fillMode}
               />
             </div>
           </div>

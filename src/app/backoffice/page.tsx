@@ -61,11 +61,22 @@ function normalizeEngine(config: GameConfig): EngineConfig {
   const normalizeLevel = (level: LevelCode): EngineLevelConfig => {
     const source = config.engine?.levels?.[level];
     const defaults = DEFAULT_ENGINE.levels[level];
-    const engineType: EngineLevelConfig["engineType"] = source?.engineType === "reels" ? "reels" : "cluster";
+    const legacyEngineType = (source as { engineType?: string } | undefined)?.engineType;
+    const fillMode: EngineLevelConfig["fillMode"] =
+      source?.fillMode === "rodillo"
+        ? "rodillo"
+        : source?.fillMode === "replace"
+          ? "replace"
+          : source?.fillMode === "cascade"
+            ? "cascade"
+            : legacyEngineType === "reels"
+              ? "rodillo"
+              : defaults.fillMode;
     return {
       ...defaults,
       ...source,
-      engineType,
+      engineType: "cluster",
+      fillMode,
       bonus: {
         ...defaults.bonus,
         ...(source?.bonus ?? {})
@@ -155,12 +166,21 @@ export default function BackofficePage() {
   const [saving, setSaving] = useState(false);
   const [message, setMessage] = useState("");
   const [error, setError] = useState("");
+  const [grafanaUrl, setGrafanaUrl] = useState("http://localhost:3002");
 
   useEffect(() => {
     const stored = window.localStorage.getItem(TOKEN_KEY);
     if (stored) {
       setToken(stored);
     }
+    const envUrl = process.env.NEXT_PUBLIC_GRAFANA_URL?.trim();
+    if (envUrl) {
+      setGrafanaUrl(envUrl.replace(/\/+$/, ""));
+      return;
+    }
+    const protocol = window.location.protocol;
+    const host = window.location.hostname;
+    setGrafanaUrl(`${protocol}//${host}:3002`);
   }, []);
 
   const hydratedEngine = useMemo(() => {
@@ -299,17 +319,10 @@ export default function BackofficePage() {
     );
   }
 
-  function setLevelFillMode(level: LevelCode, value: "replace" | "cascade") {
+  function setLevelFillMode(level: LevelCode, value: "replace" | "cascade" | "rodillo") {
     if (!config) return;
     setConfig(updateLevelField(config, level, (levelConfig) => {
       levelConfig.fillMode = value;
-    }));
-  }
-
-  function setLevelEngineType(level: LevelCode, value: "cluster" | "reels") {
-    if (!config) return;
-    setConfig(updateLevelField(config, level, (levelConfig) => {
-      levelConfig.engineType = value;
     }));
   }
 
@@ -426,6 +439,9 @@ export default function BackofficePage() {
               <button className={styles.primary} type="button" disabled={!token || !config || saving} onClick={onSaveConfig}>
                 {saving ? "Guardando..." : "Guardar config"}
               </button>
+              <a className={styles.secondary} href={grafanaUrl} target="_blank" rel="noreferrer">
+                Abrir Grafana
+              </a>
               <Link href="/" className={styles.ghost}>
                 Volver al juego
               </Link>
@@ -503,22 +519,17 @@ export default function BackofficePage() {
                     <div className={styles.row}>
                       <div className={styles.field}>
                         <label>Engine Type</label>
-                        <select
-                          value={levelEngine.engineType}
-                          onChange={(e) => setLevelEngineType(level, e.target.value as "cluster" | "reels")}
-                        >
-                          <option value="cluster">cluster</option>
-                          <option value="reels">reels</option>
-                        </select>
+                        <input value={levelEngine.engineType} disabled />
                       </div>
                       <div className={styles.field}>
                         <label>Fill Mode</label>
                         <select
                           value={levelEngine.fillMode}
-                          onChange={(e) => setLevelFillMode(level, e.target.value as "replace" | "cascade")}
+                          onChange={(e) => setLevelFillMode(level, e.target.value as "replace" | "cascade" | "rodillo")}
                         >
                           <option value="replace">replace</option>
                           <option value="cascade">cascade</option>
+                          <option value="rodillo">rodillo</option>
                         </select>
                       </div>
                     </div>

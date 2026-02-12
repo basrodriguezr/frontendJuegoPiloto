@@ -69,11 +69,11 @@ export interface LevelBonusConfig {
 }
 
 export interface EngineLevelConfig {
-  engineType: "cluster" | "reels";
+  engineType: "cluster";
   rows: number;
   cols: number;
   includeDiagonals: boolean;
-  fillMode: "replace" | "cascade";
+  fillMode: "replace" | "cascade" | "rodillo";
   maxCascades: number;
   matchMinCluster: number;
   excludedSymbols: string[];
