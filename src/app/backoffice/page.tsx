@@ -17,6 +17,7 @@ const DEFAULT_ENGINE: EngineConfig = {
   },
   levels: {
     nivel1: {
+      engineType: "cluster",
       rows: 3,
       cols: 5,
       includeDiagonals: true,
@@ -33,6 +34,7 @@ const DEFAULT_ENGINE: EngineConfig = {
       }
     },
     nivel2: {
+      engineType: "cluster",
       rows: 7,
       cols: 5,
       includeDiagonals: false,
@@ -56,28 +58,29 @@ function cloneConfig(config: GameConfig): GameConfig {
 }
 
 function normalizeEngine(config: GameConfig): EngineConfig {
+  const normalizeLevel = (level: LevelCode): EngineLevelConfig => {
+    const source = config.engine?.levels?.[level];
+    const defaults = DEFAULT_ENGINE.levels[level];
+    const engineType: EngineLevelConfig["engineType"] = source?.engineType === "reels" ? "reels" : "cluster";
+    return {
+      ...defaults,
+      ...source,
+      engineType,
+      bonus: {
+        ...defaults.bonus,
+        ...(source?.bonus ?? {})
+      }
+    };
+  };
+
   return {
     rng: {
       source: config.engine?.rng?.source || DEFAULT_ENGINE.rng.source,
       seed: config.engine?.rng?.seed ?? DEFAULT_ENGINE.rng.seed
     },
     levels: {
-      nivel1: {
-        ...DEFAULT_ENGINE.levels.nivel1,
-        ...(config.engine?.levels?.nivel1 ?? {}),
-        bonus: {
-          ...DEFAULT_ENGINE.levels.nivel1.bonus,
-          ...(config.engine?.levels?.nivel1?.bonus ?? {})
-        }
-      },
-      nivel2: {
-        ...DEFAULT_ENGINE.levels.nivel2,
-        ...(config.engine?.levels?.nivel2 ?? {}),
-        bonus: {
-          ...DEFAULT_ENGINE.levels.nivel2.bonus,
-          ...(config.engine?.levels?.nivel2?.bonus ?? {})
-        }
-      }
+      nivel1: normalizeLevel("nivel1"),
+      nivel2: normalizeLevel("nivel2")
     }
   };
 }
@@ -281,6 +284,13 @@ export default function BackofficePage() {
     }));
   }
 
+  function setLevelEngineType(level: LevelCode, value: "cluster" | "reels") {
+    if (!config) return;
+    setConfig(updateLevelField(config, level, (levelConfig) => {
+      levelConfig.engineType = value;
+    }));
+  }
+
   function setLevelDiagonals(level: LevelCode, checked: boolean) {
     if (!config) return;
     setConfig(updateLevelField(config, level, (levelConfig) => {
@@ -469,6 +479,16 @@ export default function BackofficePage() {
                     <h3 className={styles.levelTitle}>{level.toUpperCase()}</h3>
                     <p className={styles.subtle}>Reglas de tablero, match y bonus.</p>
                     <div className={styles.row}>
+                      <div className={styles.field}>
+                        <label>Engine Type</label>
+                        <select
+                          value={levelEngine.engineType}
+                          onChange={(e) => setLevelEngineType(level, e.target.value as "cluster" | "reels")}
+                        >
+                          <option value="cluster">cluster</option>
+                          <option value="reels">reels</option>
+                        </select>
+                      </div>
                       <div className={styles.field}>
                         <label>Rows</label>
                         <input

@@ -69,6 +69,7 @@ export interface LevelBonusConfig {
 }
 
 export interface EngineLevelConfig {
+  engineType: "cluster" | "reels";
   rows: number;
   cols: number;
   includeDiagonals: boolean;
