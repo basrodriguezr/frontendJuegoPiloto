@@ -44,6 +44,7 @@ const BONUS_HIGHLIGHT_LIMIT = 3;
 const MATCH_CONTOUR_DURATION = 340;
 const LEVEL_ONE_PREVIEW_SIZE = { rows: 3, cols: 5 };
 const LEVEL_TWO_PREVIEW_SIZE = { rows: 7, cols: 5 };
+const FALLBACK_STRIP_SYMBOLS = ["A", "B", "C", "D", "E", "F", "G", "H", "I", "J", "K", "L", "M", "N", "O"];
 
 function pickBoardSize(play: PlayOutcome | undefined, mode?: GameMode, previewSize?: GridSize): GridSize {
   if (play?.grid0?.length && play.grid0[0]?.length) {
@@ -220,8 +221,23 @@ function createBoardScene(
         const spinSpeed = cellPitch * 7.2;
         const minTurnsLastColumn = 2;
         const spinDurationAfterLastDropMs = Math.round((minTurnsLastColumn * wrapDistance / spinSpeed) * 1000);
+        const symbolPool = Array.from(
+          new Set(
+            (this.grid ?? [])
+              .flat()
+              .map((symbol) => String(symbol || "").trim().toUpperCase())
+              .filter(Boolean),
+          ),
+        );
+        const reelSymbols = symbolPool.length > 0 ? symbolPool : FALLBACK_STRIP_SYMBOLS;
+        const buildStrip = () => {
+          const size = Math.max(28, reelSymbols.length * 4);
+          return Array.from({ length: size }, () => reelSymbols[Math.floor(Math.random() * reelSymbols.length)] ?? "A");
+        };
 
         const columnStates = Array.from({ length: cols }, (_, col) => {
+          const strip = buildStrip();
+          const startIndex = Math.floor(Math.random() * strip.length);
           const cells = entries
             .filter((entry) => entry.col === col)
             .sort((a, b) => a.row - b.row)
@@ -233,15 +249,19 @@ function createBoardScene(
           return {
             col,
             cells,
+            strip,
+            stripCursor: startIndex + rows,
             spinning: false,
           };
         });
 
         columnStates.forEach((state) => {
-          state.cells.forEach((cell) => {
+          state.cells.forEach((cell, rowIdx) => {
             cell.container.setAlpha(0);
             cell.container.setScale(1);
             cell.container.setY(cell.targetY - lift);
+            const symbol = state.strip[(state.stripCursor + rowIdx) % state.strip.length] ?? "A";
+            this.updateCellContainerSymbol(cell.container, symbol);
           });
         });
 
@@ -258,6 +278,9 @@ function createBoardScene(
                 let nextY = cell.container.y + spinSpeed * dt;
                 while (nextY > bottomY + cellPitch / 2) {
                   nextY -= wrapDistance;
+                  const symbol = state.strip[state.stripCursor % state.strip.length] ?? "A";
+                  state.stripCursor += 1;
+                  this.updateCellContainerSymbol(cell.container, symbol);
                 }
                 cell.container.y = nextY;
               });
@@ -270,6 +293,8 @@ function createBoardScene(
           if (!state) return;
           state.spinning = false;
           state.cells.forEach((cell) => {
+            const finalSymbol = this.grid?.[cell.row]?.[col] ?? String(cell.container.getData("symbol") ?? "");
+            this.updateCellContainerSymbol(cell.container, finalSymbol);
             this.tweens.add({
               targets: cell.container,
               y: cell.targetY,
@@ -428,6 +453,38 @@ function createBoardScene(
       const container = this.add.container(x, y, [rect, highlight, shade, label]);
       container.setData("symbol", symbol);
       return container;
+    }
+
+    private updateCellContainerSymbol(container: Phaser.GameObjects.Container, symbol: string) {
+      const safeSymbol = (symbol || "").trim().toUpperCase();
+      const symbolColor = safeSymbol ? getSymbolColor(safeSymbol) : "#64748b";
+      const symbolRgb = hexToRgb(symbolColor);
+      const metallic = Boolean(this.currentPlay);
+      const baseFill = metallic ? darkenColor(symbolRgb, 0.64) : darkenColor(symbolRgb, 0.74);
+      const glowFill = metallic ? lightenColor(symbolRgb, 0.24) : darkenColor(symbolRgb, 0.55);
+      const highlightFill = metallic ? lightenColor(symbolRgb, 0.36) : lightenColor(symbolRgb, 0.2);
+      const shadeFill = metallic ? darkenColor(symbolRgb, 0.82) : darkenColor(symbolRgb, 0.76);
+
+      const rect = container.list[0] as Phaser.GameObjects.Rectangle | undefined;
+      const highlight = container.list[1] as Phaser.GameObjects.Rectangle | undefined;
+      const shade = container.list[2] as Phaser.GameObjects.Rectangle | undefined;
+      const label = container.list[3] as Phaser.GameObjects.Text | undefined;
+
+      if (rect) {
+        rect.setFillStyle(baseFill, 0.95);
+        rect.setStrokeStyle(2, glowFill, 0.9);
+      }
+      if (highlight) {
+        highlight.setFillStyle(highlightFill, metallic ? 0.42 : 0.35);
+      }
+      if (shade) {
+        shade.setFillStyle(shadeFill, metallic ? 0.24 : 0.12);
+      }
+      if (label) {
+        label.setText(safeSymbol);
+        label.setColor(metallic ? "#ffffff" : "#f8fafc");
+      }
+      container.setData("symbol", safeSymbol);
     }
 
     private playBonusTriggerHighlight(
