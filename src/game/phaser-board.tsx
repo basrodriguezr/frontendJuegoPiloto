@@ -975,7 +975,7 @@ export function PhaserBoard({ play, mode, symbolPaytable, previewSize, engineTyp
 
   useEffect(() => {
     previewSizeRef.current = previewSize;
-  }, [previewSize]);
+  }, [previewSize?.rows, previewSize?.cols]);
 
   useEffect(() => {
     engineTypeRef.current = engineType;
@@ -1115,7 +1115,7 @@ export function PhaserBoard({ play, mode, symbolPaytable, previewSize, engineTyp
     canvas.style.maxWidth = "100%";
     canvas.style.margin = "0 auto";
     containerRef.current.style.minHeight = `${metricsRef.current.height + 20}px`;
-  }, [engineType, mode, play, previewSize]);
+  }, [engineType, mode, play, previewSize?.rows, previewSize?.cols]);
 
   return <div ref={containerRef} style={{ width: "100%", aspectRatio: String(aspectRatio) }} />;
 }
