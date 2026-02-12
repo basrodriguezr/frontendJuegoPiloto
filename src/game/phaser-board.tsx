@@ -208,30 +208,132 @@ function createBoardScene(
       }
 
       if (getFillMode() === "rodillo") {
-        const colDelay = 130;
-        const rowDelay = 26;
-        const duration = 360;
-        const lift = Math.max(100, this.metrics.cellSize * 2.1);
+        const colStartDelay = 260;
+        const rowDropDelay = 34;
+        const dropDuration = 320;
+        const stopDelay = 180;
+        const settleDuration = 340;
+        const lift = Math.max(120, this.metrics.cellSize * 2.4);
+        const rows = Math.max(1, this.boardSize.rows);
+        const cols = Math.max(1, this.boardSize.cols);
+        const cellPitch = this.metrics.cellSize + this.metrics.gap;
+        const wrapDistance = rows * cellPitch;
+        const spinSpeed = cellPitch * 18;
+        const minTurnsLastColumn = 2;
+        const spinDurationAfterLastDropMs = Math.round((minTurnsLastColumn * wrapDistance / spinSpeed) * 1000);
 
-        entries.forEach(({ row, col, container }) => {
-          const delay = col * colDelay + row * rowDelay;
-          const targetY = container.y;
-          container.setAlpha(0);
-          container.setScale(1);
-          container.setY(targetY - lift);
-          this.tweens.add({
-            targets: container,
-            y: targetY,
-            alpha: 1,
-            duration,
-            delay,
-            ease: "Cubic.easeOut",
+        const columnStates = Array.from({ length: cols }, (_, col) => {
+          const cells = entries
+            .filter((entry) => entry.col === col)
+            .sort((a, b) => a.row - b.row)
+            .map((entry) => ({
+              row: entry.row,
+              container: entry.container,
+              targetY: entry.container.y,
+            }));
+          return {
+            col,
+            cells,
+            spinning: false,
+          };
+        });
+
+        columnStates.forEach((state) => {
+          state.cells.forEach((cell) => {
+            cell.container.setAlpha(0);
+            cell.container.setScale(1);
+            cell.container.setY(cell.targetY - lift);
           });
         });
 
-        const maxCol = Math.max(...entries.map((entry) => entry.col));
-        const maxRow = Math.max(...entries.map((entry) => entry.row));
-        return duration + maxCol * colDelay + maxRow * rowDelay;
+        const topY = Math.min(...entries.map((entry) => entry.container.y));
+        const bottomY = topY + (rows - 1) * cellPitch;
+        const spinTimer = this.time.addEvent({
+          delay: 16,
+          loop: true,
+          callback: () => {
+            const dt = Math.max(0.008, Math.min(0.05, (this.game.loop.delta ?? 16) / 1000));
+            columnStates.forEach((state) => {
+              if (!state.spinning) return;
+              state.cells.forEach((cell) => {
+                let nextY = cell.container.y + spinSpeed * dt;
+                while (nextY > bottomY + cellPitch / 2) {
+                  nextY -= wrapDistance;
+                }
+                cell.container.y = nextY;
+              });
+            });
+          },
+        });
+
+        const stopColumn = (col: number) => {
+          const state = columnStates[col];
+          if (!state) return;
+          state.spinning = false;
+          state.cells.forEach((cell) => {
+            this.tweens.add({
+              targets: cell.container,
+              y: cell.targetY,
+              alpha: 1,
+              duration: settleDuration,
+              ease: "Cubic.easeOut",
+            });
+          });
+        };
+
+        const scheduleStopSequence = () => {
+          this.time.delayedCall(spinDurationAfterLastDropMs, () => {
+            for (let col = 0; col < cols; col += 1) {
+              this.time.delayedCall(col * stopDelay, () => {
+                stopColumn(col);
+                if (col === cols - 1) {
+                  this.time.delayedCall(settleDuration + 40, () => {
+                    spinTimer.remove(false);
+                  });
+                }
+              });
+            }
+          });
+        };
+
+        const dropColumn = (col: number) => {
+          const state = columnStates[col];
+          if (!state || state.cells.length === 0) return;
+          let completed = 0;
+          state.cells.forEach((cell, rowIdx) => {
+            this.tweens.add({
+              targets: cell.container,
+              y: cell.targetY,
+              alpha: 1,
+              duration: dropDuration,
+              delay: rowIdx * rowDropDelay,
+              ease: "Cubic.easeOut",
+              onComplete: () => {
+                completed += 1;
+                if (completed === state.cells.length) {
+                  state.spinning = true;
+                  if (col === cols - 1) {
+                    scheduleStopSequence();
+                  }
+                }
+              },
+            });
+          });
+        };
+
+        for (let col = 0; col < cols; col += 1) {
+          this.time.delayedCall(col * colStartDelay, () => dropColumn(col));
+        }
+
+        const dropPhase =
+          (cols - 1) * colStartDelay +
+          dropDuration +
+          Math.max(0, rows - 1) * rowDropDelay;
+        const stopPhase =
+          spinDurationAfterLastDropMs +
+          Math.max(0, cols - 1) * stopDelay +
+          settleDuration;
+        return dropPhase + stopPhase;
       }
 
       const ordered = entries
@@ -789,7 +891,8 @@ function createBoardScene(
           this.grid = normalizeGrid(nextGrid, rows, cols);
           this.getBoardOffsets();
 
-          if (this.currentPlay?.mode === "nivel1") {
+          const useReplaceAnimation = getFillMode() === "replace";
+          if (useReplaceAnimation) {
             const newMap = new Map<string, Phaser.GameObjects.Container>();
             const appearDuration = 280;
 
