@@ -147,6 +147,7 @@ function createBoardScene(
     private currentPlay?: PlayOutcome;
     private accumulatedWin = 0;
     private lastPositions?: { offsetX: number; offsetY: number };
+    private reelIntroCleanup?: () => void;
 
     constructor() {
       super("BoardScene");
@@ -183,6 +184,7 @@ function createBoardScene(
     }
 
     private clearBoard() {
+      this.destroyReelIntro();
       this.time.removeAllEvents();
       this.tweens.killAll();
       this.currentPlay = undefined;
@@ -194,6 +196,13 @@ function createBoardScene(
       this.grid = emptyGrid;
       this.header?.setText("Esperando ticket");
       this.drawGrid(emptyGrid);
+    }
+
+    private destroyReelIntro() {
+      if (this.reelIntroCleanup) {
+        this.reelIntroCleanup();
+        this.reelIntroCleanup = undefined;
+      }
     }
 
     private playBoardIntro(): number {
@@ -209,17 +218,25 @@ function createBoardScene(
       }
 
       if (getFillMode() === "rodillo") {
-        const colStartDelay = 320;
-        const dropDuration = 280;
-        const stopDelay = 220;
+        this.destroyReelIntro();
+
+        const colStartDelay = 280;
+        const dropDuration = 320;
+        const stopDelay = 190;
         const settleDuration = 260;
-        const spinTickMs = 90;
         const rows = Math.max(1, this.boardSize.rows);
         const cols = Math.max(1, this.boardSize.cols);
         const cellPitch = this.metrics.cellSize + this.metrics.gap;
-        const lift = Math.max(cellPitch * 0.45, this.metrics.cellSize * 0.7);
+        const visibleHeight = rows * this.metrics.cellSize + (rows - 1) * this.metrics.gap;
+        const topLift = Math.max(this.metrics.cellSize * 1.4, cellPitch * 1.1);
+        const spinSpeed = cellPitch * 9.5;
         const minTurnsLastColumn = 2;
-        const requiredLastColumnSteps = rows * minTurnsLastColumn;
+        const requiredLastColumnDistance = rows * cellPitch * minTurnsLastColumn;
+        const bufferTop = 2;
+        const bufferBottom = 3;
+        const stripRows = rows + bufferTop + bufferBottom;
+        const totalStripSpan = stripRows * cellPitch;
+        const wrapLimit = (rows + bufferBottom - 0.5) * cellPitch;
         const symbolPool = Array.from(
           new Set(
             (this.grid ?? [])
@@ -229,89 +246,110 @@ function createBoardScene(
           ),
         );
         const reelSymbols = symbolPool.length > 0 ? symbolPool : FALLBACK_STRIP_SYMBOLS;
-        const buildStrip = () => {
-          const size = Math.max(28, reelSymbols.length * 4);
-          return Array.from({ length: size }, () => reelSymbols[Math.floor(Math.random() * reelSymbols.length)] ?? "A");
-        };
+        const pickSymbol = () => reelSymbols[Math.floor(Math.random() * reelSymbols.length)] ?? "A";
+        const offsets = this.getBoardOffsets();
 
-        const columnStates = Array.from({ length: cols }, (_, col) => {
-          const strip = buildStrip();
-          const startIndex = Math.floor(Math.random() * strip.length);
-          const cells = entries
+        const baseCellsByColumn = Array.from({ length: cols }, (_, col) =>
+          entries
             .filter((entry) => entry.col === col)
             .sort((a, b) => a.row - b.row)
             .map((entry) => ({
               row: entry.row,
               container: entry.container,
               targetY: entry.container.y,
-            }));
+            })),
+        );
+
+        baseCellsByColumn.forEach((colCells) => {
+          colCells.forEach((cell) => {
+            cell.container.setAlpha(0);
+          });
+        });
+
+        const reelStates = Array.from({ length: cols }, (_, col) => {
+          const x = offsets.offsetX + col * (this.metrics.cellSize + this.metrics.gap);
+          const y = offsets.offsetY;
+          const reelContainer = this.add.container(x, y);
+          reelContainer.setAlpha(0);
+          reelContainer.setY(y - topLift);
+
+          const maskGraphic = this.add.graphics();
+          maskGraphic.fillStyle(0xffffff, 1);
+          maskGraphic.fillRect(x, y, this.metrics.cellSize, visibleHeight);
+          const mask = maskGraphic.createGeometryMask();
+          reelContainer.setMask(mask);
+
+          const cells = Array.from({ length: stripRows }, (_, idx) => {
+            const symbol = pickSymbol();
+            const cell = this.createCellContainer(symbol, 0, (idx - bufferTop) * cellPitch);
+            reelContainer.add(cell);
+            return cell;
+          });
+
           return {
             col,
+            reelContainer,
+            maskGraphic,
             cells,
-            strip,
-            stripCursor: startIndex + rows,
             spinning: false,
           };
         });
 
-        columnStates.forEach((state) => {
-          state.cells.forEach((cell, rowIdx) => {
-            cell.container.setAlpha(0);
-            cell.container.setScale(1);
-            cell.container.setY(cell.targetY - lift);
-            const symbol = state.strip[(state.stripCursor + rowIdx) % state.strip.length] ?? "A";
-            this.updateCellContainerSymbol(cell.container, symbol);
-          });
-        });
-
-        let lastColumnSpinSteps = 0;
-        let stopSequenceScheduled = false;
-
-        const scheduleStopSequence = () => {
-          if (stopSequenceScheduled) return;
-          stopSequenceScheduled = true;
-          for (let col = 0; col < cols; col += 1) {
-            this.time.delayedCall(col * stopDelay, () => {
-              const state = columnStates[col];
-              if (!state) return;
-              state.spinning = false;
-              state.cells.forEach((cell) => {
-                const finalSymbol = this.grid?.[cell.row]?.[col] ?? String(cell.container.getData("symbol") ?? "");
-                this.updateCellContainerSymbol(cell.container, finalSymbol);
-                this.tweens.add({
-                  targets: cell.container,
-                  y: cell.targetY,
-                  alpha: 1,
-                  duration: settleDuration,
-                  ease: "Cubic.easeOut",
-                });
-              });
-              if (col === cols - 1) {
-                this.time.delayedCall(settleDuration + 40, () => {
-                  spinTimer.remove(false);
-                });
-              }
-            });
-          }
-        };
+        let lastColumnDistance = 0;
+        let stopScheduled = false;
 
         const spinTimer = this.time.addEvent({
-          delay: spinTickMs,
+          delay: 16,
           loop: true,
           callback: () => {
-            columnStates.forEach((state) => {
+            const dt = Math.max(0.008, Math.min(0.05, (this.game.loop.delta ?? 16) / 1000));
+            reelStates.forEach((state) => {
               if (!state.spinning) return;
-              state.stripCursor += 1;
-              state.cells.forEach((cell, rowIdx) => {
-                const symbol = state.strip[(state.stripCursor + rowIdx) % state.strip.length] ?? "A";
-                this.updateCellContainerSymbol(cell.container, symbol);
-                const offset = state.stripCursor % 2 === 0 ? -2 : 2;
-                cell.container.setY(cell.targetY + offset);
+              state.cells.forEach((cell) => {
+                let nextY = cell.y + spinSpeed * dt;
+                while (nextY > wrapLimit) {
+                  nextY -= totalStripSpan;
+                  this.updateCellContainerSymbol(cell, pickSymbol());
+                }
+                cell.y = nextY;
               });
-              if (state.col === cols - 1 && !stopSequenceScheduled) {
-                lastColumnSpinSteps += 1;
-                if (lastColumnSpinSteps >= requiredLastColumnSteps) {
-                  scheduleStopSequence();
+              if (state.col === cols - 1 && !stopScheduled) {
+                lastColumnDistance += spinSpeed * dt;
+                if (lastColumnDistance >= requiredLastColumnDistance) {
+                  stopScheduled = true;
+                  for (let stopCol = 0; stopCol < cols; stopCol += 1) {
+                    this.time.delayedCall(stopCol * stopDelay, () => {
+                      const stopState = reelStates[stopCol];
+                      if (!stopState) return;
+                      stopState.spinning = false;
+                      this.tweens.add({
+                        targets: stopState.reelContainer,
+                        alpha: 0,
+                        duration: settleDuration,
+                        ease: "Cubic.easeOut",
+                      });
+
+                      const baseCells = baseCellsByColumn[stopCol] ?? [];
+                      baseCells.forEach((base) => {
+                        const finalSymbol = this.grid?.[base.row]?.[stopCol] ?? String(base.container.getData("symbol") ?? "");
+                        this.updateCellContainerSymbol(base.container, finalSymbol);
+                        base.container.setY(base.targetY - 8);
+                        this.tweens.add({
+                          targets: base.container,
+                          y: base.targetY,
+                          alpha: 1,
+                          duration: settleDuration,
+                          ease: "Cubic.easeOut",
+                        });
+                      });
+
+                      if (stopCol === cols - 1) {
+                        this.time.delayedCall(settleDuration + 40, () => {
+                          this.destroyReelIntro();
+                        });
+                      }
+                    });
+                  }
                 }
               }
             });
@@ -319,24 +357,17 @@ function createBoardScene(
         });
 
         const dropColumn = (col: number) => {
-          const state = columnStates[col];
-          if (!state || state.cells.length === 0) return;
-          let completed = 0;
-          state.cells.forEach((cell) => {
-            this.tweens.add({
-              targets: cell.container,
-              y: cell.targetY,
-              alpha: 1,
-              duration: dropDuration,
-              delay: 0,
-              ease: "Cubic.easeOut",
-              onComplete: () => {
-                completed += 1;
-                if (completed === state.cells.length) {
-                  state.spinning = true;
-                }
-              },
-            });
+          const state = reelStates[col];
+          if (!state) return;
+          this.tweens.add({
+            targets: state.reelContainer,
+            y: offsets.offsetY,
+            alpha: 1,
+            duration: dropDuration,
+            ease: "Cubic.easeOut",
+            onComplete: () => {
+              state.spinning = true;
+            },
           });
         };
 
@@ -344,14 +375,18 @@ function createBoardScene(
           this.time.delayedCall(col * colStartDelay, () => dropColumn(col));
         }
 
-        const dropPhase =
-          (cols - 1) * colStartDelay +
-          dropDuration;
-        const stopPhase =
-          requiredLastColumnSteps * spinTickMs +
-          Math.max(0, cols - 1) * stopDelay +
-          settleDuration;
-        return dropPhase + stopPhase;
+        this.reelIntroCleanup = () => {
+          spinTimer.remove(false);
+          reelStates.forEach((state) => {
+            state.reelContainer.destroy();
+            state.maskGraphic.destroy();
+          });
+        };
+
+        const dropPhase = (cols - 1) * colStartDelay + dropDuration;
+        const spinPhase = Math.round((requiredLastColumnDistance / spinSpeed) * 1000);
+        const stopPhase = (cols - 1) * stopDelay + settleDuration;
+        return dropPhase + spinPhase + stopPhase;
       }
 
       if (getFillMode() === "cascade") {
@@ -866,6 +901,7 @@ function createBoardScene(
     }
 
     renderPlay(play: PlayOutcome) {
+      this.destroyReelIntro();
       this.time.removeAllEvents();
       this.tweens.killAll();
       this.currentPlay = play;

@@ -2,6 +2,31 @@
 
 Este README resume como ejecutar el frontend (React + Next.js + Phaser) del MVP, usar el backend de palo y correr pruebas.
 
+## Arranque rapido sin Docker (juego + backoffice)
+
+1. Terminal 1 (backend):
+```bash
+cd ../backend
+npm install
+npm run migrate
+npm run seed
+npm run dev
+```
+
+2. Terminal 2 (frontend):
+```bash
+npm install
+npm run dev
+```
+
+3. Abrir:
+- Juego: `http://localhost:3000`
+- Backoffice: `http://localhost:3000/backoffice`
+
+Credenciales demo (si corriste `npm run seed`):
+- Email: `demo@piloto.local`
+- Password: `Demo1234!`
+
 ## Prerrequisitos
 - Node.js >= 18 y npm (o pnpm/yarn si se habilita).
 - Acceso local al backend (Express + Postgres) que expone WebSocket para config/outcomes.
