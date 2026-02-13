@@ -220,17 +220,17 @@ function createBoardScene(
       if (getFillMode() === "rodillo") {
         this.destroyReelIntro();
 
-        const colStartDelay = 280;
-        const dropDuration = 320;
-        const stopDelay = 190;
+        const colStartDelay = 300;
+        const dropDuration = 420;
+        const stopDelay = 210;
         const settleDuration = 260;
         const rows = Math.max(1, this.boardSize.rows);
         const cols = Math.max(1, this.boardSize.cols);
         const cellPitch = this.metrics.cellSize + this.metrics.gap;
         const visibleHeight = rows * this.metrics.cellSize + (rows - 1) * this.metrics.gap;
         const topLift = Math.max(this.metrics.cellSize * 1.4, cellPitch * 1.1);
-        const spinSpeed = cellPitch * 9.5;
-        const minTurnsLastColumn = 2;
+        const spinSpeed = cellPitch * 5.2;
+        const minTurnsLastColumn = 2.4;
         const requiredLastColumnDistance = rows * cellPitch * minTurnsLastColumn;
         const bufferTop = 2;
         const bufferBottom = 3;
@@ -276,6 +276,7 @@ function createBoardScene(
           const maskGraphic = this.add.graphics();
           maskGraphic.fillStyle(0xffffff, 1);
           maskGraphic.fillRect(x, y, this.metrics.cellSize, visibleHeight);
+          maskGraphic.setVisible(false);
           const mask = maskGraphic.createGeometryMask();
           reelContainer.setMask(mask);
 
